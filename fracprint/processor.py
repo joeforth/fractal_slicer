@@ -95,7 +95,10 @@ def fileread(filedir, filename):
         filetype = 'wkt'
 
     elif filename[-4:] == '.txt':
-        filetype = 'xyz'
+        filetype = 'txt'
+
+    else:
+        print('File type not recognised - please use .csv or .txt')
 
     return data, filetype
 
@@ -185,12 +188,17 @@ def shape_prep(filedir, filename, x_dim, y_dim, inlet_d, x_trans, y_trans, res):
     # Load pattern data
     data, filetype = fileread(filedir, filename)
 
+    # Convert input shape into a DataFrame
     if filetype == 'wkt':
-        # x_all, y_all, z_all = wkt_preprocess(data, filetype)
-        data = wkt_preprocess(data, filetype)
-        print(data)
-        # coords = spacer(coords, res)
-        # print(coords)
+        print('Inkscape csv file detected')
+        data = wkt_preprocess(data)
+
+    if filetype == 'txt':
+        print('Rhino txt file detected')
+        data = txt_preprocess(data)
+
+    # coords = spacer(coords, res)
+    # print(coords)
 
     # elif filetype == 'txt':
     # # Calculate centre of mass, min and max x and y values, and bounding box size, autoscales shape to fit in bounding box, applies an x-y translation to change centre of pattern
@@ -230,7 +238,11 @@ def spacer(coords, res):
     return [x, y, z]
 
 
-def wkt_preprocess(data, filetype):
+def txt_preprocess(data):
+    print(data)
+
+
+def wkt_preprocess(data):
     # Split wkt file into LINESTRING/POLYGON elements, return x and y coordinates 
     # Each element corresponds to a different element of the wkt
     # Note the coordinates strings are sometimes so long print won't show them all
@@ -247,6 +259,7 @@ def wkt_preprocess(data, filetype):
     pattern = [item for sublist in pattern for item in sublist]
     pattern = pd.DataFrame(pattern, columns=['x', 'y', 'z', 'e_id'])
     return pattern
+
 
 def wkt_splitter(string_in):
     # Splits the string from a .wkt file into its individual components
@@ -272,7 +285,7 @@ def wkt_splitter(string_in):
 # Parameters to vary
 filedir = './test_files/'  # Directory where the files are stored
 # filename = 'test_squiggle_3d.txt'       # Name of the file you're loading
-filename = 'test_squiggle_2d.csv'
+filename = 'test_squiggle_3d.txt'
 x_dim, y_dim = 22., 22.       # x, y dimensions of the container you're printing into
 x_trans, y_trans = 0., 0.    # Distance by which to translate the pattern
 inlet_d = 0.                 # Length of the inlet / outlet ports in mm
