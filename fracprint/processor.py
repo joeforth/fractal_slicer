@@ -84,23 +84,24 @@ def coordinater_wkt(string_in, idx):
 #     return E_fac, E_diff, s_list, s_diff
 
 
-def fileread(filedir, filename):
-    # Read target wkt/svg file, split into elements
-    with open(os.path.join(filedir, filename)) as f:
-        data = f.read() 
+def fileread(filedir, filename, filetype):
+    if filetype == 'inkscape':
+        print('Inkscape csv file detected')
+        # Read target wkt/svg file, split into elements
+        with open(os.path.join(filedir, filename)) as f:
+            data = f.read() 
+            data = data.split('\n')
+            data = data[1:len(data)-1]
 
-    if filename[-4:] == '.csv':
-        data = data.split('\n')
-        data = data[1:len(data)-1]
-        filetype = 'wkt'
-
-    elif filename[-4:] == '.txt':
-        filetype = 'txt'
+    elif filetype == 'rhino':
+        print('Rhino csv file detected')
+        data = pd.read_csv(os.path.join(filedir, filename), header=None)
+        data.columns = ['x', 'y', 'z', 'r', 'g', 'b']
 
     else:
-        print('File type not recognised - please use .csv or .txt')
+        print("File type not recognised - please use 'rhino' or 'inkscape'")
 
-    return data, filetype
+    return data
 
 # def interpolator(x_in, y_in, res):
 #     # Replot pattern with point spacing = res mm
@@ -184,18 +185,14 @@ def fileread(filedir, filename):
 #     return y
 
 
-def shape_prep(filedir, filename, x_dim, y_dim, inlet_d, x_trans, y_trans, res):
+def shape_prep(filedir, filename, filetype, x_dim, y_dim, inlet_d, x_trans, y_trans, res):
     # Load pattern data
-    data, filetype = fileread(filedir, filename)
-
+    data = fileread(filedir, filename, filetype)
     # Convert input shape into a DataFrame
-    if filetype == 'wkt':
-        print('Inkscape csv file detected')
-        data = wkt_preprocess(data)
-
-    if filetype == 'txt':
-        print('Rhino txt file detected')
-        data = txt_preprocess(data)
+    if filetype == 'inkscape':
+        data = inkscape_preprocess(data)
+    
+    return data
 
     # coords = spacer(coords, res)
     # print(coords)
@@ -238,11 +235,12 @@ def spacer(coords, res):
     return [x, y, z]
 
 
-def txt_preprocess(data):
-    print(data)
+def rhino_preprocess(data):
+    # From shapeprep()
+    return data
 
 
-def wkt_preprocess(data):
+def inkscape_preprocess(data):
     # Split wkt file into LINESTRING/POLYGON elements, return x and y coordinates 
     # Each element corresponds to a different element of the wkt
     # Note the coordinates strings are sometimes so long print won't show them all
@@ -257,7 +255,7 @@ def wkt_preprocess(data):
             pattern.append(element)
 
     pattern = [item for sublist in pattern for item in sublist]
-    pattern = pd.DataFrame(pattern, columns=['x', 'y', 'z', 'e_id'])
+    pattern = pd.DataFrame(pattern, columns=['x', 'y', 'z', 'line_id'])
     return pattern
 
 
@@ -282,14 +280,14 @@ def wkt_splitter(string_in):
     return string_in
 
 
-# Parameters to vary
-filedir = './test_files/'  # Directory where the files are stored
-# filename = 'test_squiggle_3d.txt'       # Name of the file you're loading
-filename = 'test_squiggle_3d.txt'
-x_dim, y_dim = 22., 22.       # x, y dimensions of the container you're printing into
-x_trans, y_trans = 0., 0.    # Distance by which to translate the pattern
-inlet_d = 0.                 # Length of the inlet / outlet ports in mm
-res = 0.1  # Pattern resolution in mm
+# # Parameters to vary
+# filedir = './test_files/'  # Directory where the files are stored
+# # filename = 'test_squiggle_3d.txt'       # Name of the file you're loading
+# filename = 'test_squiggle_3d.txt'
+# x_dim, y_dim = 22., 22.       # x, y dimensions of the container you're printing into
+# x_trans, y_trans = 0., 0.    # Distance by which to translate the pattern
+# inlet_d = 0.                 # Length of the inlet / outlet ports in mm
+# res = 0.1  # Pattern resolution in mm
 
-# x_all_shift, y_all_shift = processor.shape_prep(filedir, filename, x_dim, y_dim, inlet_d, x_trans, y_trans, res)
-shape_prep(filedir, filename, x_dim, y_dim, inlet_d, x_trans, y_trans, res)
+# # x_all_shift, y_all_shift = processor.shape_prep(filedir, filename, x_dim, y_dim, inlet_d, x_trans, y_trans, res)
+# shape_prep(filedir, filename, x_dim, y_dim, inlet_d, x_trans, y_trans, res)
