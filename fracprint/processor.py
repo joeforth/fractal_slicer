@@ -46,6 +46,16 @@ def coordinater_wkt(string_in, idx):
         form.append([x, y, z, e_id])
     return form
  
+def distance_calculator(df):
+    # Drop NaN values (usually the first value)
+    dx = df['x'].diff()
+    dy = df['y'].diff()
+    dz = df['z'].diff()
+
+    # Calculate the Euclidean distance between consecutive rows
+    distances = np.sqrt(dx**2 + dy**2 + dz**2)
+    df['distance_from_last'] = distances
+    return df
 
 # def E_calculator(x_in, y_in, res_in, d_in, exp_in, offset_in, alpha_in):
 #     # Takes a set of x-coords, y-coords, a resolution (res), a fibril diamter (d_in), 
@@ -192,6 +202,9 @@ def shape_prep(filedir, filename, filetype, x_dim, y_dim, inlet_d, x_trans, y_tr
     if filetype == 'inkscape':
         data = inkscape_preprocess(data)
     
+    if filetype == 'rhino':
+        data = rhino_preprocess(data)
+
     return data
 
     # coords = spacer(coords, res)
@@ -237,6 +250,19 @@ def spacer(coords, res):
 
 def rhino_preprocess(data):
     # From shapeprep()
+    data = distance_calculator(data)
+    # Assign each line a unique id based on the RGB values
+    data['line_id'] = pd.factorize(data[['r','g','b']].apply(tuple, axis=1))[0]
+
+    shape = data[data['line_id'] == 0]
+
+    if shape.iloc[-1]['distance_from_last'] > 0.1:
+        # Move the last row to the top
+        last_row = shape.iloc[[-1]]  # Select the last row as a DataFrame
+        remaining_rows = shape.iloc[:-1]  # Select all rows except the last
+        shape = pd.concat([last_row, remaining_rows]).reset_index(drop=True)
+    shape = distance_calculator(shape)
+
     return data
 
 
@@ -244,6 +270,7 @@ def inkscape_preprocess(data):
     # Split wkt file into LINESTRING/POLYGON elements, return x and y coordinates 
     # Each element corresponds to a different element of the wkt
     # Note the coordinates strings are sometimes so long print won't show them all
+    print('inkscape file being processed')
     pattern = []
     # Each element is a LINESTRING or POLYGON
     for idx, element in enumerate(data):
