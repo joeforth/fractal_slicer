@@ -113,6 +113,25 @@ def fileread(filedir, filename, filetype):
 
     return data
 
+def inkscape_preprocess(data):
+    # Split wkt file into LINESTRING/POLYGON elements, return x and y coordinates 
+    # Each element corresponds to a different element of the wkt
+    # Note the coordinates strings are sometimes so long print won't show them all
+    print('inkscape file being processed')
+    pattern = []
+    # Each element is a LINESTRING or POLYGON
+    for idx, element in enumerate(data):
+        element = wkt_splitter(element)
+        element = coordinater_wkt(element, idx)
+        if not len(element):
+            print('Ignoring point')
+        if len(element):
+            pattern.append(element)
+
+    pattern = [item for sublist in pattern for item in sublist]
+    pattern = pd.DataFrame(pattern, columns=['x', 'y', 'z', 'line_id'])
+    return pattern
+
 # def interpolator(x_in, y_in, res):
 #     # Replot pattern with point spacing = res mm
 #     # Interpolator that plots the pattern at 100 µm spacing
@@ -133,6 +152,18 @@ def fileread(filedir, filename, filetype):
 #             y_out = np.append(y_out, new_points_y)
 #     return x_out, y_out
 
+def midlinejumpsplitter(shape, df):
+    # Split lines that have big jumps in the middle
+    # Need to assign line id in a separate function
+    if shape['distance_from_last'].max() > 1.:
+        # Split the line at the index
+        split_index = shape[shape['distance_from_last'] > 1.].index[0]
+        shape1 = shape.iloc[:split_index]
+        shape1['line_id'] = df['line_id'].unique()[-1] + 1
+        shape2 = shape.iloc[split_index:]
+        shape2['line_id'] = df['line_id'].unique()[-1] + 2
+        df = pd.concat([df[df['line_id'] != 0], shape1, shape2]).reset_index(drop=True)
+    return df
 
 # def plot_out(x_all_in, y_all_in, x_all_shift_in, y_all_shift_in, inlet_d, x_min_shift, x_max_shift):
 #     fig = plt.figure()
@@ -194,6 +225,36 @@ def fileread(filedir, filename, filetype):
 # #     ax.set_ylabel('Reduction factor')
 #     return y
 
+def remove_overlap(shape):
+    # Checks for any large jumps at the end of a line and, if found, moves the last row to the top
+    # This hopefully removes the jump and makes the line continuous
+    # Note this seems very fragile and I probably need add a second check for large jumps at the end of the code
+    if shape.iloc[-1]['distance_from_last'] > 1.:
+        # Move the last row to the top
+        last_row = shape.iloc[[-1]]  # Select the last row as a DataFrame
+        remaining_rows = shape.iloc[:-1]  # Select all rows except the last
+        shape = pd.concat([last_row, remaining_rows]).reset_index(drop=True)
+
+    shape = distance_calculator(shape)
+    return shape
+
+
+def rhino_preprocess(data):
+    # From shapeprep()
+    data = distance_calculator(data)
+    # Assign each line a unique id based on the RGB values
+    data['line_id'] = pd.factorize(data[['r','g','b']].apply(tuple, axis=1))[0]
+    data = data.groupby('line_id', group_keys=False).apply(remove_overlap)
+    data = distance_calculator(data) # Recalculate distances on modified df
+
+    # Set distance from last to NaN for the first row of each line
+    data.loc[data.groupby('line_id').head(1).index, 'distance_from_last'] = np.nan
+
+    # Split lines that have big jumps in the middle
+    data = data.groupby('line_id', group_keys=False).apply(lambda shape: midlinejumpsplitter(shape, data))
+
+    return data
+
 
 def shape_prep(filedir, filename, filetype, x_dim, y_dim, inlet_d, x_trans, y_trans, res):
     # Load pattern data
@@ -246,44 +307,6 @@ def spacer(coords, res):
             del y[i]
             del z[i]
     return [x, y, z]
-
-
-def rhino_preprocess(data):
-    # From shapeprep()
-    data = distance_calculator(data)
-    # Assign each line a unique id based on the RGB values
-    data['line_id'] = pd.factorize(data[['r','g','b']].apply(tuple, axis=1))[0]
-
-    shape = data[data['line_id'] == 0]
-
-    if shape.iloc[-1]['distance_from_last'] > 0.1:
-        # Move the last row to the top
-        last_row = shape.iloc[[-1]]  # Select the last row as a DataFrame
-        remaining_rows = shape.iloc[:-1]  # Select all rows except the last
-        shape = pd.concat([last_row, remaining_rows]).reset_index(drop=True)
-    shape = distance_calculator(shape)
-
-    return data
-
-
-def inkscape_preprocess(data):
-    # Split wkt file into LINESTRING/POLYGON elements, return x and y coordinates 
-    # Each element corresponds to a different element of the wkt
-    # Note the coordinates strings are sometimes so long print won't show them all
-    print('inkscape file being processed')
-    pattern = []
-    # Each element is a LINESTRING or POLYGON
-    for idx, element in enumerate(data):
-        element = wkt_splitter(element)
-        element = coordinater_wkt(element, idx)
-        if not len(element):
-            print('Ignoring point')
-        if len(element):
-            pattern.append(element)
-
-    pattern = [item for sublist in pattern for item in sublist]
-    pattern = pd.DataFrame(pattern, columns=['x', 'y', 'z', 'line_id'])
-    return pattern
 
 
 def wkt_splitter(string_in):
