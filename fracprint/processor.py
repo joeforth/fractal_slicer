@@ -2,8 +2,11 @@
 import math
 import os
 import pandas as pd
+pd.options.mode.chained_assignment = None  # default='warn'
 import matplotlib.pyplot as plt
 import numpy as np
+from scipy.spatial import distance as dist
+import scipy.cluster.hierarchy as hier
 np.seterr(invalid='ignore')   # Suppress divide by zero error
 
 
@@ -152,18 +155,86 @@ def inkscape_preprocess(data):
 #             y_out = np.append(y_out, new_points_y)
 #     return x_out, y_out
 
-def midlinejumpsplitter(shape, df):
-    # Split lines that have big jumps in the middle
-    # Need to assign line id in a separate function
-    if shape['distance_from_last'].max() > 1.:
-        # Split the line at the index
-        split_index = shape[shape['distance_from_last'] > 1.].index[0]
-        shape1 = shape.iloc[:split_index]
-        shape1['line_id'] = df['line_id'].unique()[-1] + 1
-        shape2 = shape.iloc[split_index:]
-        shape2['line_id'] = df['line_id'].unique()[-1] + 2
-        df = pd.concat([df[df['line_id'] != 0], shape1, shape2]).reset_index(drop=True)
-    return df
+
+def node_plotter(df, terminal_points):
+    # Plots lines assigning a colour to each line_id
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection='3d')
+
+    for n in np.unique(df['line_id'].values):
+        ax.plot(df[df['line_id'] == n]['x'], df[df['line_id'] == n]['y'], df[df['line_id'] == n]['z'])
+
+    # If you need a specific line plotting
+    # n = 2
+    # ax.plot(df[df['line_id'] == n]['x'], df[df['line_id'] == n]['y'], df[df['line_id'] == n]['z']
+
+    for n in np.unique(terminal_points['cluster'].values):
+        ax.scatter(terminal_points[terminal_points['cluster'] == n]['x'], terminal_points[terminal_points['cluster'] == n]['y'], terminal_points[terminal_points['cluster'] == n]['z'])
+
+    ax.view_init(elev=30, azim=60)  # Elevation of 30 degrees, azimuth of 45 degrees
+    plt.show()
+
+
+def midlinejumpsplitter(shape):
+    # This needs generalising to lines with more than 2 jumps
+    print('Splitting line with id:', shape['line_id'].unique()[0])
+    id = shape['line_id'].unique()[0]
+    # Split the line at the index - at the moment uses a completely arbitrary distance of 2mm
+    split_index = shape[shape['distance_from_last'] > 2.].index[0]
+    shape1 = shape.iloc[:split_index]
+    shape1['line_id'] = 1
+    shape1['distance_from_last'].iloc[0] = np.nan
+    shape2 = shape.iloc[split_index:]
+    shape2['line_id'] = 2
+    shape2['distance_from_last'].iloc[0] = np.nan
+    return shape1, shape2
+
+
+def node_finder(df):
+    # Use hierarchical clustering to note common start / end points
+    # Calculate node positions based on cluster centroids
+    # Append centroids to start / end of each line
+
+    start_points = df.groupby('line_id').first() # First point of each line
+    end_points = df.groupby('line_id').last() # Last
+    terminal_points = pd.concat([start_points, end_points])   # Combine the two
+    dist_mat = dist.pdist(terminal_points[['x', 'y', 'z']].values)   
+    link_mat = hier.linkage(dist_mat)
+    # fcluster assigns each of the particles in positions a cluster to which it belongs
+    cluster_idx = hier.fcluster(link_mat, t=1, criterion='distance')   # t defines the max cophonetic distance in a cluster
+    terminal_points['cluster'] = cluster_idx
+
+    # Calculate the mean position of each cluster
+    nodes = terminal_points.groupby('cluster').mean()
+    for n in terminal_points.index.unique():
+        print ('Line ID:', n)
+        clusters = terminal_points.loc[n]['cluster']
+        for c in clusters:
+            print('Connected to cluster', c)
+            new_point = nodes.loc[c:c]
+            line = df[df['line_id'] == n]
+            line_start = line.head(1)
+            line_end = line.tail(1)
+            new_point[['r', 'g', 'b', 'line_id']] = line_start[['r', 'g', 'b', 'line_id']].values
+
+            start_sep = dist.euclidean(new_point[['x', 'y', 'z']].values[0], line_start[['x', 'y', 'z']].values[0])
+            end_sep = dist.euclidean(new_point[['x', 'y', 'z']].values[0], line_end[['x', 'y', 'z']].values[0])
+            if start_sep < end_sep:
+                print('Adding new point to start of line')
+                line = pd.concat([new_point, line]) 
+            elif start_sep > end_sep:
+                print('Adding new point to end of line')
+                line = pd.concat([line, new_point])
+            
+            df = df[df['line_id'] != n]
+            df = pd.concat([df, line])
+            df = df.reset_index(drop=True)
+            df = distance_calculator(df)
+            
+            # Set distance from last to NaN for the first row of each line
+            df.loc[df.groupby('line_id').head(1).index, 'distance_from_last'] = np.nan
+    return df, terminal_points
+
 
 # def plot_out(x_all_in, y_all_in, x_all_shift_in, y_all_shift_in, inlet_d, x_min_shift, x_max_shift):
 #     fig = plt.figure()
@@ -229,7 +300,7 @@ def remove_overlap(shape):
     # Checks for any large jumps at the end of a line and, if found, moves the last row to the top
     # This hopefully removes the jump and makes the line continuous
     # Note this seems very fragile and I probably need add a second check for large jumps at the end of the code
-    if shape.iloc[-1]['distance_from_last'] > 1.:
+    if shape.iloc[-1]['distance_from_last'] > 2.:
         # Move the last row to the top
         last_row = shape.iloc[[-1]]  # Select the last row as a DataFrame
         remaining_rows = shape.iloc[:-1]  # Select all rows except the last
@@ -239,19 +310,28 @@ def remove_overlap(shape):
     return shape
 
 
-def rhino_preprocess(data):
-    # From shapeprep()
-    data = distance_calculator(data)
-    # Assign each line a unique id based on the RGB values
-    data['line_id'] = pd.factorize(data[['r','g','b']].apply(tuple, axis=1))[0]
-    data = data.groupby('line_id', group_keys=False).apply(remove_overlap)
-    data = distance_calculator(data) # Recalculate distances on modified df
+def rhino_preprocess(df):
+    # Calculate the distance between consecutive points
+    df = distance_calculator(df)
+    # If line ID column doesn't exist, assign line IDs based on RGB values
+    if 'line_id' not in df.columns:
+        df['line_id'] = pd.factorize(df[['r','g','b']].apply(tuple, axis=1))[0]
+    # Remove large jumps at the end of lines
+    df = df.groupby('line_id', group_keys=False).apply(remove_overlap)
+
+    # Recalculate the distance between consecutive points
+    df = distance_calculator(df)
 
     # Set distance from last to NaN for the first row of each line
-    data.loc[data.groupby('line_id').head(1).index, 'distance_from_last'] = np.nan
+    df.loc[df.groupby('line_id').head(1).index, 'distance_from_last'] = np.nan
 
-    # Split lines that have big jumps in the middle
-    data = data.groupby('line_id', group_keys=False).apply(lambda shape: midlinejumpsplitter(shape, data))
+    # Find and split lines that have big jumps in the middle, e.g., inlet and outlet lines
+    df = shapesplitter(df)
+
+    # Set distance from last to NaN for the first row of each line
+    df.loc[df.groupby('line_id').head(1).index, 'distance_from_last'] = np.nan
+    df, terminal_points = node_finder(df)
+    node_plotter(df, terminal_points)
 
     return data
 
@@ -265,11 +345,9 @@ def shape_prep(filedir, filename, filetype, x_dim, y_dim, inlet_d, x_trans, y_tr
     
     if filetype == 'rhino':
         data = rhino_preprocess(data)
+        return data
 
-    return data
-
-    # coords = spacer(coords, res)
-    # print(coords)
+    coords = spacer(coords, res)
 
     # elif filetype == 'txt':
     # # Calculate centre of mass, min and max x and y values, and bounding box size, autoscales shape to fit in bounding box, applies an x-y translation to change centre of pattern
@@ -297,6 +375,29 @@ def shape_prep(filedir, filename, filetype, x_dim, y_dim, inlet_d, x_trans, y_tr
     # print('Bounding box after scaling =', bbox_x_shift + 2*inlet_d, 'mm x', bbox_y_shift, 'mm')
 
     # return x_all_shift, y_all_shift
+
+
+def shapesplitter(df):
+    # Identify line IDs that have large jumps in the middle
+    line_ids = np.sort(df['line_id'].unique())   # Sorting makes life easier later
+    line_ids_new = line_ids.copy()   # A list of line IDs that we're going to update
+    for line_id in line_ids:
+        print(line_id)
+        shape = df[df['line_id'] == line_id]
+        if shape['distance_from_last'].max() > 2.:
+            print(shape)
+            print(shape[shape['distance_from_last'] > 2.])
+            shape1, shape2 = midlinejumpsplitter(shape)
+            print('Getting ride of line with id:', line_id)
+            df  = df[df['line_id'] != line_id] 
+            line_ids_new = line_ids_new[line_ids_new != line_id]
+            line_ids_new = np.append(line_ids_new, [line_ids_new[-1]+1, line_ids_new[-1]+2])
+            print('Adding lines with ids:', line_ids_new[-2], line_ids_new[-1])
+            shape1['line_id'], shape2['line_id'] = line_ids_new[-2], line_ids_new[-1]
+            shape = pd.concat([shape1, shape2])
+            df = pd.concat([df, shape])  
+    return df
+
 
 def spacer(coords, res):
     # Now truncate it so that you only have coords separated by 100 µm
