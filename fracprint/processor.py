@@ -60,6 +60,60 @@ def distance_calculator(df):
     df['distance_from_last'] = distances
     return df
 
+
+def eulerficator(df, terminal_points, nodes):
+    terminal_points_nogroups = terminal_points.reset_index()
+    clusters = terminal_points_nogroups['cluster'].unique()
+    lines = terminal_points_nogroups['line_id'].unique()
+
+    # Run through each cluster and create two dictionaries 
+    # 1 - cluster numbers as key and the connecting lines as values
+    # 2 - cluster numbers as key and the number of connecting nodes as values
+    cluster_dict = {}
+    connectivity_dict = {}
+    for c in clusters:
+        connecting_lines = terminal_points_nogroups[terminal_points_nogroups['cluster'] == c]
+        cluster_dict[c] = list(connecting_lines['line_id'].values)
+
+        connectivity_dict[c] = len(connecting_lines)
+
+    line_order = []
+    while len(line_order) < len(lines):
+        # Sort lines by height order - bottom up
+        min_z = df.groupby('line_id')['z'].min()
+        heightsorted_line_ids = min_z.sort_values().index.tolist()
+        unprinted_lines = [n for n in heightsorted_line_ids if n not in line_order]
+
+        # Pick the unprinted line with the lowest z-value to start with
+        next_line = unprinted_lines[0]
+        line_order.append(next_line)
+        unprinted_lines = unprinted_lines[1:] # Remove the printed line from the list of remaining lines
+
+        # Calculate which node you're at - it's the other node to which next_line is connected
+        connected_nodes = terminal_points.loc[next_line]['cluster'].values
+
+        # Pick the node with the lower z-value
+        start_node = nodes.loc[connected_nodes]['z'].idxmin()
+        end_node = connected_nodes[connected_nodes != start_node][0]
+
+        connected_lines = cluster_dict[end_node]
+        # Calculate unprinted connected lines in height-order
+        connected_lines = [n for n in unprinted_lines if n in connected_lines]
+        while len(connected_lines) > 0:
+            next_line = connected_lines[0]
+            line_order.append(next_line)
+            unprinted_lines.remove(next_line)
+            # Calculate which node you've moved to
+            connected_nodes = terminal_points.loc[next_line]['cluster'].values
+            start_node = end_node
+            end_node = connected_nodes[connected_nodes != start_node][0]
+            connected_lines = cluster_dict[end_node]
+
+            # Remove lines that have already been printed
+            connected_lines = [n for n in unprinted_lines if n in connected_lines]
+    return line_order
+
+
 # def E_calculator(x_in, y_in, res_in, d_in, exp_in, offset_in, alpha_in):
 #     # Takes a set of x-coords, y-coords, a resolution (res), a fibril diamter (d_in), 
 #     # power law exponent (exp_in), offset (distance from end of path to start flow slowdown, 
@@ -207,10 +261,8 @@ def node_finder(df):
     # Calculate the mean position of each cluster
     nodes = terminal_points.groupby('cluster').mean()
     for n in terminal_points.index.unique():
-        print ('Line ID:', n)
         clusters = terminal_points.loc[n]['cluster']
         for c in clusters:
-            print('Connected to cluster', c)
             new_point = nodes.loc[c:c]
             line = df[df['line_id'] == n]
             line_start = line.head(1)
@@ -220,10 +272,8 @@ def node_finder(df):
             start_sep = dist.euclidean(new_point[['x', 'y', 'z']].values[0], line_start[['x', 'y', 'z']].values[0])
             end_sep = dist.euclidean(new_point[['x', 'y', 'z']].values[0], line_end[['x', 'y', 'z']].values[0])
             if start_sep < end_sep:
-                print('Adding new point to start of line')
                 line = pd.concat([new_point, line]) 
             elif start_sep > end_sep:
-                print('Adding new point to end of line')
                 line = pd.concat([line, new_point])
             
             df = df[df['line_id'] != n]
@@ -333,7 +383,7 @@ def rhino_preprocess(df):
     df, terminal_points = node_finder(df)
     node_plotter(df, terminal_points)
 
-    return data
+    return df
 
 
 def shape_prep(filedir, filename, filetype, x_dim, y_dim, inlet_d, x_trans, y_trans, res):
@@ -342,6 +392,7 @@ def shape_prep(filedir, filename, filetype, x_dim, y_dim, inlet_d, x_trans, y_tr
     # Convert input shape into a DataFrame
     if filetype == 'inkscape':
         data = inkscape_preprocess(data)
+        return data
     
     if filetype == 'rhino':
         data = rhino_preprocess(data)
