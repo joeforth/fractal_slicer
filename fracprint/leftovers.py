@@ -104,3 +104,26 @@ while len(line_order) < len(lines):
 
         # Remove lines that have already been printed
         connected_lines = [n for n in unprinted_lines if n in connected_lines]
+
+#
+line1 = line_order_grouped[0][0]
+
+start1 = df_write[df_write['line_id'] == line1].iloc[0][['x', 'y', 'z']].values 
+node1 = nodes.loc[line1][['x', 'y', 'z']].values
+
+if not np.array_equal(start1, node1):
+    print('Reversing line ')
+    df_write[df_write['line_id'] == line1] = df_write[df_write['line_id'] == line1].iloc[::-1]
+
+df_write
+# line2 = line_order_grouped[0][1]
+# start2 = df_write[df_write['line_id'] == line2].iloc[0][['x', 'y', 'z']].values
+# node2 = nodes.loc[1][['x', 'y', 'z']].values
+
+# if not np.array_equal(start2, node2):
+#     df_write[df_write['line_id'] == line1] = df_write[df_write['line_id'] == line1].iloc[::-1]
+
+# end1 = df[df['line_id'] == line1].tail(1)[['x', 'y', 'z']].values
+# end2 = df[df['line_id'] == line2].tail(1)[['x', 'y', 'z']].values
+# start1 = df[df['line_id'] == line1].head(1)[['x', 'y', 'z']].values
+# start2 = df[df['line_id'] == line2].head(1)[['x', 'y', 'z']].values
