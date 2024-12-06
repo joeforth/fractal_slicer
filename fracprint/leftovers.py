@@ -30,3 +30,77 @@ def coordinater_wkt_old(string_in, idx):
         e_id.append(idx)
 
     return [x, y, z, e_id]
+
+
+    # leftover from when we picked first node based on connectivity
+# sorted_connectivity = dict(sorted(connectivity_dict.items(), key=lambda x: x[1]))
+# next_node = next(iter(sorted_connectivity))
+# next_line = cluster_dict[next_node][0]
+
+# next_line = df[df['z'] == df['z'].min()]['line_id'].values[0]
+
+# lowest = connected_lines[0]
+# lowest_z = df[df['line_id'] == lowest]['z'].min()
+# for line in connected_lines:
+#     z_min = df[df['line_id'] == line]['z'].min()
+#     if z_min < lowest_z:
+#         lowest = line
+#         lowest_z = z_min
+
+# connected_lines = [x for x in connected_lines if x in unprinted_lines]
+# If there are connected lines remaining, now print the line with the lowest z value
+
+
+## Leftover code from Eulerficator
+terminal_points_nogroups = terminal_points.reset_index()
+clusters = terminal_points_nogroups['cluster'].unique()
+lines = terminal_points_nogroups['line_id'].unique()
+
+# Run through each cluster and create two dictionaries 
+# 1 - cluster numbers as key and the connecting lines as values
+# 2 - cluster numbers as key and the number of connecting nodes as values
+cluster_dict = {}
+connectivity_dict = {}
+for c in clusters:
+    connecting_lines = terminal_points_nogroups[terminal_points_nogroups['cluster'] == c]
+    cluster_dict[c] = list(connecting_lines['line_id'].values)
+
+    connectivity_dict[c] = len(connecting_lines)
+
+line_order = []
+while len(line_order) < len(lines):
+    print('line_order:', line_order)
+    print('lines:', lines)
+    # Sort lines by height order - bottom up
+    min_z = df.groupby('line_id')['z'].min()
+    heightsorted_line_ids = min_z.sort_values().index.tolist()
+    unprinted_lines = [n for n in heightsorted_line_ids if n not in line_order]
+    print('unprinted_lines:', unprinted_lines)
+
+    # Pick the unprinted line with the lowest z-value to start with
+    next_line = unprinted_lines[0]
+    line_order.append(next_line)
+    unprinted_lines = unprinted_lines[1:] # Remove the printed line from the list of remaining lines
+
+    # Calculate which node you're at - it's the other node to which next_line is connected
+    connected_nodes = terminal_points.loc[next_line]['cluster'].values
+
+    # Pick the node with the lower z-value
+    start_node = nodes.loc[connected_nodes]['z'].idxmin()
+    end_node = connected_nodes[connected_nodes != start_node][0]
+
+    connected_lines = cluster_dict[end_node]
+    # Calculate unprinted connected lines in height-order
+    connected_lines = [n for n in unprinted_lines if n in connected_lines]
+    while len(connected_lines) > 0:
+        next_line = connected_lines[0]
+        line_order.append(next_line)
+        unprinted_lines.remove(next_line)
+        # Calculate which node you've moved to
+        connected_nodes = terminal_points.loc[next_line]['cluster'].values
+        start_node = end_node
+        end_node = connected_nodes[connected_nodes != start_node][0]
+        connected_lines = cluster_dict[end_node]
+
+        # Remove lines that have already been printed
+        connected_lines = [n for n in unprinted_lines if n in connected_lines]

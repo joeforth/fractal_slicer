@@ -3,7 +3,24 @@ np.seterr(invalid='ignore')   # Suppress divide by zero error
 from fracprint import processor
 import matplotlib.pyplot as plt
 
-def gcode(x_all_shift, y_all_shift, res, inlet_d, filename, v, d, exp, dist, floor, roof, preex, init, term, retract, alpha, extrusion_on):
+def gcode(data, line_order):
+    # Write file preamble:
+    target.write("""
+    M82 ; absolute extrusion mode
+    G90 ; use absolute positioning
+    M104 S0.0 ; Set Hotend Temperature to zero
+    M140 S0.0 ; set bed temp
+    M190 S0.0 ; wait for bed temp
+    G28 ; home all
+    G92 E0.0 ; Set zero extrusion
+    M107 ; Fan off
+
+    G1 X97.5 Y147 F2000 ; Move printhead to centre of printbed
+    G92 X0 Y0 E0 ; Set zero extrusion
+
+    """)
+
+def gcode_old(x_all_shift, y_all_shift, res, inlet_d, filename, v, d, exp, dist, floor, roof, preex, init, term, retract, alpha, extrusion_on):
     # Varying flow rate as a function of distance from start / end points
     # Calculate F, make some lists
     # F = (alpha / 1000.)*math.pi*(600*v)*(d/2.)**2

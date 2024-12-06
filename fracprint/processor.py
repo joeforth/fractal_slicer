@@ -78,7 +78,13 @@ def eulerficator(df, terminal_points, nodes):
         connectivity_dict[c] = len(connecting_lines)
 
     line_order = []
+    line_order_grouped = []
+    node_order = [] 
+    node_order_grouped = []
     while len(line_order) < len(lines):
+        current_line_lines = []
+        current_line_nodes = []
+
         # Sort lines by height order - bottom up
         min_z = df.groupby('line_id')['z'].min()
         heightsorted_line_ids = min_z.sort_values().index.tolist()
@@ -87,31 +93,46 @@ def eulerficator(df, terminal_points, nodes):
         # Pick the unprinted line with the lowest z-value to start with
         next_line = unprinted_lines[0]
         line_order.append(next_line)
+        current_line_lines.append(next_line)
         unprinted_lines = unprinted_lines[1:] # Remove the printed line from the list of remaining lines
 
         # Calculate which node you're at - it's the other node to which next_line is connected
         connected_nodes = terminal_points.loc[next_line]['cluster'].values
 
-        # Pick the node with the lower z-value
+        # Start at node with lower z-value - record as first node of this line
         start_node = nodes.loc[connected_nodes]['z'].idxmin()
-        end_node = connected_nodes[connected_nodes != start_node][0]
+        current_line_nodes.append(start_node)
+        node_order.append(start_node)
 
-        connected_lines = cluster_dict[end_node]
-        # Calculate unprinted connected lines in height-order
-        connected_lines = [n for n in unprinted_lines if n in connected_lines]
+        # Find node at other end of line
+        end_node = connected_nodes[connected_nodes != start_node][0]
+        current_line_nodes.append(end_node)
+        node_order.append(end_node)
+
+        connected_lines = cluster_dict[end_node]   # Lines connected to end node
+        connected_lines = [n for n in unprinted_lines if n in connected_lines]   # List unprinted connected lines in height-order
         while len(connected_lines) > 0:
+            # Pick next line based on lowest z_min
             next_line = connected_lines[0]
             line_order.append(next_line)
+            current_line_lines.append(next_line)
             unprinted_lines.remove(next_line)
+
             # Calculate which node you've moved to
             connected_nodes = terminal_points.loc[next_line]['cluster'].values
             start_node = end_node
             end_node = connected_nodes[connected_nodes != start_node][0]
+            current_line_nodes.append(end_node)
+
             connected_lines = cluster_dict[end_node]
 
             # Remove lines that have already been printed
             connected_lines = [n for n in unprinted_lines if n in connected_lines]
-    return line_order
+        
+        line_order_grouped.append(current_line_lines)
+        node_order_grouped.append(current_line_nodes)
+
+    return line_order, node_order, line_order_grouped, node_order_grouped
 
 
 # def E_calculator(x_in, y_in, res_in, d_in, exp_in, offset_in, alpha_in):
@@ -231,7 +252,7 @@ def node_plotter(df, terminal_points):
 
 def midlinejumpsplitter(shape):
     # This needs generalising to lines with more than 2 jumps
-    print('Splitting line with id:', shape['line_id'].unique()[0])
+    # print('Splitting line with id:', shape['line_id'].unique()[0])
     id = shape['line_id'].unique()[0]
     # Split the line at the index - at the moment uses a completely arbitrary distance of 2mm
     split_index = shape[shape['distance_from_last'] > 2.].index[0]
@@ -283,7 +304,7 @@ def node_finder(df):
             
             # Set distance from last to NaN for the first row of each line
             df.loc[df.groupby('line_id').head(1).index, 'distance_from_last'] = np.nan
-    return df, terminal_points
+    return df, terminal_points, nodes
 
 
 # def plot_out(x_all_in, y_all_in, x_all_shift_in, y_all_shift_in, inlet_d, x_min_shift, x_max_shift):
@@ -301,35 +322,35 @@ def node_finder(df):
 #     ax2.set_title('After Scaling - with inlets')
 
 
-# def param_calculator(x_in, y_in, x_dim_in, y_dim_in, x_trans_in, y_trans_in):
-#     # Autoscales to fit a pre-determined bounding box (defined by x_dim and y_dim)
-#     bbox_x_out, bbox_y_out, x_com_out, y_com_out, x_min_out, x_max_out, y_min_out, y_max_out = bbox_calculator(x_in, y_in)
+def param_calculator(x_in, y_in, x_dim_in, y_dim_in, x_trans_in, y_trans_in):
+    # Autoscales to fit a pre-determined bounding box (defined by x_dim and y_dim)
+    bbox_x_out, bbox_y_out, x_com_out, y_com_out, x_min_out, x_max_out, y_min_out, y_max_out = bbox_calculator(x_in, y_in)
     
-#     if bbox_x_out > 0:
-#         x_scale = x_dim_in / bbox_x_out
-#     if bbox_x_out == 0:
-#         print('Zero pattern width detected - scaling by 1')
-#         x_scale = 1.
+    if bbox_x_out > 0:
+        x_scale = x_dim_in / bbox_x_out
+    if bbox_x_out == 0:
+        print('Zero pattern width detected - scaling by 1')
+        x_scale = 1.
     
-#     if bbox_y_out > 0:
-#         y_scale = y_dim_in / bbox_y_out
-#     if bbox_y_out == 0:
-#         print('Zero pattern height detected - scaling by 1')
-#         y_scale = 1.
+    if bbox_y_out > 0:
+        y_scale = y_dim_in / bbox_y_out
+    if bbox_y_out == 0:
+        print('Zero pattern height detected - scaling by 1')
+        y_scale = 1.
     
-#     # Rescales and shifts all input coordinates
-#     x_all_shift_scale, y_all_shift_scale = [], []
-#     for i in range(0, len(x_in)):
-#         x_all_shift_scale.append((x_in[i] - x_com_out)*x_scale)
-#         y_all_shift_scale.append((y_in[i] - y_com_out)*y_scale)
+    # Rescales and shifts all input coordinates
+    x_all_shift_scale, y_all_shift_scale = [], []
+    for i in range(0, len(x_in)):
+        x_all_shift_scale.append((x_in[i] - x_com_out)*x_scale)
+        y_all_shift_scale.append((y_in[i] - y_com_out)*y_scale)
         
-#     # Finally, apply an x-y translation to manually shift the centre of the print, if desired
-#     x_all_shift_out, y_all_shift_out = [], []
-#     for i in range(0, len(x_in)):
-#         x_all_shift_out.append((x_all_shift_scale[i] + x_trans_in))
-#         y_all_shift_out.append((y_all_shift_scale[i] + y_trans_in))
+    # Finally, apply an x-y translation to manually shift the centre of the print, if desired
+    x_all_shift_out, y_all_shift_out = [], []
+    for i in range(0, len(x_in)):
+        x_all_shift_out.append((x_all_shift_scale[i] + x_trans_in))
+        y_all_shift_out.append((y_all_shift_scale[i] + y_trans_in))
         
-#     return x_all_shift_out, y_all_shift_out, x_com_out, y_com_out, x_min_out, x_max_out, y_min_out, y_max_out, bbox_x_out, bbox_y_out
+    return x_all_shift_out, y_all_shift_out, x_com_out, y_com_out, x_min_out, x_max_out, y_min_out, y_max_out, bbox_x_out, bbox_y_out
 
 
 # def power_law(x_in, exp, shift):
@@ -380,10 +401,11 @@ def rhino_preprocess(df):
 
     # Set distance from last to NaN for the first row of each line
     df.loc[df.groupby('line_id').head(1).index, 'distance_from_last'] = np.nan
-    df, terminal_points = node_finder(df)
+    df, terminal_points, nodes = node_finder(df)
     node_plotter(df, terminal_points)
 
-    return df
+    line_order, node_order, line_order_grouped, node_order_grouped = eulerficator(df, terminal_points, nodes)
+    return df, line_order, node_order, line_order_grouped, node_order_grouped
 
 
 def shape_prep(filedir, filename, filetype, x_dim, y_dim, inlet_d, x_trans, y_trans, res):
@@ -392,40 +414,37 @@ def shape_prep(filedir, filename, filetype, x_dim, y_dim, inlet_d, x_trans, y_tr
     # Convert input shape into a DataFrame
     if filetype == 'inkscape':
         data = inkscape_preprocess(data)
-        return data
+
+        # Space out points - currently not used as Rhino does this quite well.
+        data = spacer(coords, res)
+
+        # Calculate centre of mass, min and max x and y values, and bounding box size, autoscales shape to fit in bounding box, applies an x-y translation to change centre of pattern
+        data, x_com, y_com, x_min, x_max, y_min, y_max, bbox_x, bbox_y = param_calculator(x_all, y_all, x_dim-2*inlet_d, y_dim, x_trans, y_trans)
     
-    if filetype == 'rhino':
-        data = rhino_preprocess(data)
-        return data
+        # # Calculate size of bounding box after scaling
+        # bbox_x_shift, bbox_y_shift, x_com_shift, y_com_shift, x_min_shift, x_max_shift, y_min_shift, y_max_shift = bbox_calculator(x_all_shift, y_all_shift)
 
-    coords = spacer(coords, res)
+        # # Add inlets and outlets - note the order of this is important, as E_calculator needs finely spaced points to work
+        # if inlet_d > 0:
+        #     inlet_x, inlet_y = [x_min_shift - inlet_d, x_min_shift], [0, 0]
+        #     outlet_x, outlet_y = [x_max_shift + inlet_d, x_max_shift], [0, 0]
+        #     x_all_shift.insert(0, inlet_x)
+        #     x_all_shift.insert(1, outlet_x)
+        #     y_all_shift.insert(0, inlet_y)
+        #     y_all_shift.insert(1, outlet_y)
 
-    # elif filetype == 'txt':
-    # # Calculate centre of mass, min and max x and y values, and bounding box size, autoscales shape to fit in bounding box, applies an x-y translation to change centre of pattern
-    # x_all_shift, y_all_shift, x_com, y_com, x_min, x_max, y_min, y_max, bbox_x, bbox_y = param_calculator(x_all, y_all, x_dim-2*inlet_d, y_dim, x_trans, y_trans)
+        # # Interpolate points 
+        # for j in range(0, len(x_all_shift)):
+        #     x_all_shift[j], y_all_shift[j] = interpolator(x_all_shift[j], y_all_shift[j], res=0.1)
 
-    # # Calculate size of bounding box after scaling
-    # bbox_x_shift, bbox_y_shift, x_com_shift, y_com_shift, x_min_shift, x_max_shift, y_min_shift, y_max_shift = bbox_calculator(x_all_shift, y_all_shift)
+        # # Plot output
+        # plot_out(x_all, y_all, x_all_shift, y_all_shift, inlet_d, x_min_shift, x_max_shift)
+        # print('Bounding box before scaling =', bbox_x, 'mm x', bbox_y, 'mm')
+        # print('Bounding box after scaling =', bbox_x_shift + 2*inlet_d, 'mm x', bbox_y_shift, 'mm')
 
-    # # Add inlets and outlets - note the order of this is important, as E_calculator needs finely spaced points to work
-    # if inlet_d > 0:
-    #     inlet_x, inlet_y = [x_min_shift - inlet_d, x_min_shift], [0, 0]
-    #     outlet_x, outlet_y = [x_max_shift + inlet_d, x_max_shift], [0, 0]
-    #     x_all_shift.insert(0, inlet_x)
-    #     x_all_shift.insert(1, outlet_x)
-    #     y_all_shift.insert(0, inlet_y)
-    #     y_all_shift.insert(1, outlet_y)
-
-    # # Interpolate points 
-    # for j in range(0, len(x_all_shift)):
-    #     x_all_shift[j], y_all_shift[j] = interpolator(x_all_shift[j], y_all_shift[j], res=0.1)
-
-    # # Plot output
-    # plot_out(x_all, y_all, x_all_shift, y_all_shift, inlet_d, x_min_shift, x_max_shift)
-    # print('Bounding box before scaling =', bbox_x, 'mm x', bbox_y, 'mm')
-    # print('Bounding box after scaling =', bbox_x_shift + 2*inlet_d, 'mm x', bbox_y_shift, 'mm')
-
-    # return x_all_shift, y_all_shift
+    elif filetype == 'rhino':
+        data, line_order = rhino_preprocess(data)
+        return data, line_order
 
 
 def shapesplitter(df):
@@ -433,17 +452,12 @@ def shapesplitter(df):
     line_ids = np.sort(df['line_id'].unique())   # Sorting makes life easier later
     line_ids_new = line_ids.copy()   # A list of line IDs that we're going to update
     for line_id in line_ids:
-        print(line_id)
         shape = df[df['line_id'] == line_id]
         if shape['distance_from_last'].max() > 2.:
-            print(shape)
-            print(shape[shape['distance_from_last'] > 2.])
             shape1, shape2 = midlinejumpsplitter(shape)
-            print('Getting ride of line with id:', line_id)
             df  = df[df['line_id'] != line_id] 
             line_ids_new = line_ids_new[line_ids_new != line_id]
             line_ids_new = np.append(line_ids_new, [line_ids_new[-1]+1, line_ids_new[-1]+2])
-            print('Adding lines with ids:', line_ids_new[-2], line_ids_new[-1])
             shape1['line_id'], shape2['line_id'] = line_ids_new[-2], line_ids_new[-1]
             shape = pd.concat([shape1, shape2])
             df = pd.concat([df, shape])  
@@ -451,7 +465,7 @@ def shapesplitter(df):
 
 
 def spacer(coords, res):
-    # Now truncate it so that you only have coords separated by 100 µm
+    # Now truncate it so that you only have coords separated by res µm
     x, y, z = coords[0], coords[1], coords[2]
     for i in range(0, len(x)-1)[::-1]:
         if cartesian2d(x[i], y[i], x[i+1], y[i+1]) < 0.1:
@@ -480,16 +494,3 @@ def wkt_splitter(string_in):
         string_in = ''
    
     return string_in
-
-
-# # Parameters to vary
-# filedir = './test_files/'  # Directory where the files are stored
-# # filename = 'test_squiggle_3d.txt'       # Name of the file you're loading
-# filename = 'test_squiggle_3d.txt'
-# x_dim, y_dim = 22., 22.       # x, y dimensions of the container you're printing into
-# x_trans, y_trans = 0., 0.    # Distance by which to translate the pattern
-# inlet_d = 0.                 # Length of the inlet / outlet ports in mm
-# res = 0.1  # Pattern resolution in mm
-
-# # x_all_shift, y_all_shift = processor.shape_prep(filedir, filename, x_dim, y_dim, inlet_d, x_trans, y_trans, res)
-# shape_prep(filedir, filename, x_dim, y_dim, inlet_d, x_trans, y_trans, res)
