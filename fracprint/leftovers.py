@@ -127,3 +127,25 @@ df_write
 # end2 = df[df['line_id'] == line2].tail(1)[['x', 'y', 'z']].values
 # start1 = df[df['line_id'] == line1].head(1)[['x', 'y', 'z']].values
 # start2 = df[df['line_id'] == line2].head(1)[['x', 'y', 'z']].values
+
+
+# # Something weird happening with how we rearrange the start/end of lines to match the nodes
+
+# Make lines run in node order.
+df = df.set_index('line_id').loc[line_order].reset_index()   # Reorder the dataframe based on the line order
+
+for idx_path, path in enumerate(line_order_grouped):
+    for idx_line, line in enumerate(path):
+        start_node = node_order_grouped[idx_path][idx_line]
+        line_start = df[df['line_id'] == line].iloc[0][['x', 'y', 'z']].values 
+        node_loc = nodes.loc[start_node][['x', 'y', 'z']].values
+
+        if not np.array_equal(line_start, node_loc):
+            print('Reversing line ', line)
+            # df[df['line_id'] == line] = df[df['line_id'] == line].iloc[::-1]
+            new_line = df[df['line_id'] == line].iloc[::-1]
+            df = df[df['line_id'] != line]
+            df = pd.concat([df, new_line])
+
+df = df.set_index('line_id').loc[line_order].reset_index()   # Reorder the dataframe based on the line order
+df = distance_calculator(df)

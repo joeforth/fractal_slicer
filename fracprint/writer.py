@@ -4,6 +4,8 @@ from fracprint import processor
 import matplotlib.pyplot as plt
 
 def gcode(data, line_order):
+
+
     # Write file preamble:
     target.write("""
     M82 ; absolute extrusion mode
@@ -19,6 +21,7 @@ def gcode(data, line_order):
     G92 X0 Y0 E0 ; Set zero extrusion
 
     """)
+
 
 def gcode_old(x_all_shift, y_all_shift, res, inlet_d, filename, v, d, exp, dist, floor, roof, preex, init, term, retract, alpha, extrusion_on):
     # Varying flow rate as a function of distance from start / end points

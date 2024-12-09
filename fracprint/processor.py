@@ -135,7 +135,14 @@ def eulerficator(df, terminal_points, nodes):
     return line_order, node_order, line_order_grouped, node_order_grouped
 
 
-# def E_calculator(x_in, y_in, res_in, d_in, exp_in, offset_in, alpha_in):
+def e_calculator(df):
+    alpha = 1
+    diameter = 1
+    df['E'] = np.pi*alpha*df['distance_from_last']*(diameter/2)**2  # Amount to extrude
+    return df
+
+
+# def E_calculator_old(x_in, y_in, res_in, d_in, exp_in, offset_in, alpha_in):
 #     # Takes a set of x-coords, y-coords, a resolution (res), a fibril diamter (d_in), 
 #     # power law exponent (exp_in), offset (distance from end of path to start flow slowdown, 
 #     # and volume conversion factor (alpha_in) 
@@ -231,23 +238,25 @@ def inkscape_preprocess(data):
 #     return x_out, y_out
 
 
-def node_plotter(df, terminal_points):
-    # Plots lines assigning a colour to each line_id
-    fig = plt.figure()
-    ax = fig.add_subplot(111, projection='3d')
+def line_order_corrector(df, line_order, line_order_grouped, nodes, node_order_grouped):
+    # Make lines run in node order.
+    df = df.set_index('line_id').loc[line_order].reset_index()   # Reorder the dataframe based on the line order
 
-    for n in np.unique(df['line_id'].values):
-        ax.plot(df[df['line_id'] == n]['x'], df[df['line_id'] == n]['y'], df[df['line_id'] == n]['z'])
+    for idx_path, path in enumerate(line_order_grouped):
+        for idx_line, line in enumerate(path):
+            start_node = node_order_grouped[idx_path][idx_line]
+            line_start = df[df['line_id'] == line].iloc[0][['x', 'y', 'z']].values 
+            node_loc = nodes.loc[start_node][['x', 'y', 'z']].values
 
-    # If you need a specific line plotting
-    # n = 2
-    # ax.plot(df[df['line_id'] == n]['x'], df[df['line_id'] == n]['y'], df[df['line_id'] == n]['z']
+            if not np.array_equal(line_start, node_loc):
+                # print('Reversing line ', line)
+                new_line = df[df['line_id'] == line].iloc[::-1]
+                df = df[df['line_id'] != line]
+                df = pd.concat([df, new_line])
 
-    for n in np.unique(terminal_points['cluster'].values):
-        ax.scatter(terminal_points[terminal_points['cluster'] == n]['x'], terminal_points[terminal_points['cluster'] == n]['y'], terminal_points[terminal_points['cluster'] == n]['z'])
-
-    ax.view_init(elev=30, azim=60)  # Elevation of 30 degrees, azimuth of 45 degrees
-    plt.show()
+    df = df.set_index('line_id').loc[line_order].reset_index()   # Reorder the dataframe based on the line order
+    df = distance_calculator(df)
+    return df
 
 
 def midlinejumpsplitter(shape):
@@ -305,6 +314,25 @@ def node_finder(df):
             # Set distance from last to NaN for the first row of each line
             df.loc[df.groupby('line_id').head(1).index, 'distance_from_last'] = np.nan
     return df, terminal_points, nodes
+
+
+def node_plotter(df, terminal_points):
+    # Plots lines assigning a colour to each line_id
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection='3d')
+
+    for n in np.unique(df['line_id'].values):
+        ax.plot(df[df['line_id'] == n]['x'], df[df['line_id'] == n]['y'], df[df['line_id'] == n]['z'])
+
+    # If you need a specific line plotting
+    # n = 2
+    # ax.plot(df[df['line_id'] == n]['x'], df[df['line_id'] == n]['y'], df[df['line_id'] == n]['z']
+
+    for n in np.unique(terminal_points['cluster'].values):
+        ax.scatter(terminal_points[terminal_points['cluster'] == n]['x'], terminal_points[terminal_points['cluster'] == n]['y'], terminal_points[terminal_points['cluster'] == n]['z'])
+
+    ax.view_init(elev=30, azim=60)  # Elevation of 30 degrees, azimuth of 45 degrees
+    plt.show()
 
 
 # def plot_out(x_all_in, y_all_in, x_all_shift_in, y_all_shift_in, inlet_d, x_min_shift, x_max_shift):
@@ -401,25 +429,22 @@ def rhino_preprocess(df):
 
     # Set distance from last to NaN for the first row of each line
     df.loc[df.groupby('line_id').head(1).index, 'distance_from_last'] = np.nan
-    df, terminal_points, nodes = node_finder(df)
-    node_plotter(df, terminal_points)
 
-    line_order, node_order, line_order_grouped, node_order_grouped = eulerficator(df, terminal_points, nodes)
-    return df, line_order, node_order, line_order_grouped, node_order_grouped
+    return df
 
 
 def shape_prep(filedir, filename, filetype, x_dim, y_dim, inlet_d, x_trans, y_trans, res):
     # Load pattern data
-    data = fileread(filedir, filename, filetype)
+    df = fileread(filedir, filename, filetype)
     # Convert input shape into a DataFrame
     if filetype == 'inkscape':
-        data = inkscape_preprocess(data)
+        df = inkscape_preprocess(data)
 
         # Space out points - currently not used as Rhino does this quite well.
-        data = spacer(coords, res)
+        df = spacer(coords, res)
 
         # Calculate centre of mass, min and max x and y values, and bounding box size, autoscales shape to fit in bounding box, applies an x-y translation to change centre of pattern
-        data, x_com, y_com, x_min, x_max, y_min, y_max, bbox_x, bbox_y = param_calculator(x_all, y_all, x_dim-2*inlet_d, y_dim, x_trans, y_trans)
+        df, x_com, y_com, x_min, x_max, y_min, y_max, bbox_x, bbox_y = param_calculator(x_all, y_all, x_dim-2*inlet_d, y_dim, x_trans, y_trans)
     
         # # Calculate size of bounding box after scaling
         # bbox_x_shift, bbox_y_shift, x_com_shift, y_com_shift, x_min_shift, x_max_shift, y_min_shift, y_max_shift = bbox_calculator(x_all_shift, y_all_shift)
@@ -443,8 +468,17 @@ def shape_prep(filedir, filename, filetype, x_dim, y_dim, inlet_d, x_trans, y_tr
         # print('Bounding box after scaling =', bbox_x_shift + 2*inlet_d, 'mm x', bbox_y_shift, 'mm')
 
     elif filetype == 'rhino':
-        data, line_order = rhino_preprocess(data)
-        return data, line_order
+        df = rhino_preprocess(df)
+
+        df, terminal_points, nodes = node_finder(df)
+        node_plotter(df, terminal_points)
+
+        line_order, node_order, line_order_grouped, node_order_grouped = eulerficator(df, terminal_points, nodes)
+        print(line_order)
+
+        # Correct line order to run in node order
+        df = line_order_corrector(df, line_order, line_order_grouped, nodes, node_order_grouped)
+        return df, line_order
 
 
 def shapesplitter(df):
