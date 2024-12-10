@@ -18,12 +18,6 @@ def e_calculator(df, line_order_grouped, d):
     return df
 
 
-# def first_line(df):
-#     first_line = positioning(df[df['line_id'] == path[0]].iloc[0], f_print)
-#     with open("gcode.txt", "a") as file:
-#         file.write(first_line)
-
-
 def preamble():
     preamble_out = """; Setup section
 M82 ; absolute extrusion mode
@@ -59,7 +53,6 @@ M104 S0 ; Set Hotend Temperature to zero
 
 
 def position_printhead(df, line_id, f_print):
-    print('line_id', line_id)
     first_line = df[df['line_id'] == line_id].iloc[0]
     positioning = """\n
 ; Initial positioning for new print path
@@ -94,14 +87,11 @@ G1 Z{} F1000""".format(5+df['z'].max())
 def gcode_writer(df, line_order_grouped, f_print, d, floor):
     # Calculate extrusion amount between points
     df_print = e_calculator(df, line_order_grouped, d)
-    df_print = df_print + floor
+    df_print['z'] = df_print['z'] + floor
     df_print = df_print.round(3)
-
     # Write sections to file
     preamble()
-    print('line_order_grouped: ', line_order_grouped)
     for path in line_order_grouped:
-        print("path: ", path)
         position_printhead(df_print, path[0], f_print)
         for line_id in path:
             print_line(df_print, line_id)

@@ -327,3 +327,4 @@ def gcode_old(x_all_shift, y_all_shift, res, inlet_d, filename, v, d, exp, dist,
     plt.savefig(name_out + '_dist=' + str(dist) + '_exp=' + str(exp) + '_v=' + str(v) + '_d=' + str(d) + '_preex=' + str(preex) + '.png', dpi=300, bbox_inches='tight')
     # Compile all the data down somewhere useful
     # data = pd.DataFrame(np.stack((x_list, y_list, z_list, s_list, E_list), axis=1), columns=['x', 'y', 'z', 's', 'E'])
+
