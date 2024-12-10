@@ -14,7 +14,7 @@ def e_calculator(df, line_order_grouped, d):
         index_to_update = df[df['line_id'] == path[0]].index[0]  # Find the index of the first match
         df.loc[index_to_update, 'E'] = 0  # Update the value at that index
 
-    df['E_cumulutative'] = df['E'].cumsum()
+    df['E_cumulative'] = df['E'].cumsum()
     return df
 
 
@@ -69,7 +69,7 @@ def print_line(df, line_id):
     line = df[df['line_id'] == line_id]
     start_line = "\n\n; Start of line number: " + str(line_id) + "\n"
     gcode_output = "\n".join(
-        "G1 X" + line['x'].astype(str) + " Y" + line['y'].astype(str) + " Z" + line['z'].astype(str) + " E" + line['E'].astype(str))
+        "G1 X" + line['x'].astype(str) + " Y" + line['y'].astype(str) + " Z" + line['z'].astype(str) + " E" + line['E_cumulative'].astype(str))
     with open("gcode.txt", "a") as file:
         file.write(start_line)
         file.write(gcode_output)
@@ -79,7 +79,7 @@ def raise_printhead(df):
     # Give 5 mm clearance
     raise_printhead_out = """\n
 ; Raise printhead
-G1 Z{} F1000""".format(5+df['z'].max())
+G1 Z{} F200""".format(5+df['z'].max())
     with open("gcode.txt", "a") as file:
         file.write(raise_printhead_out)
 
