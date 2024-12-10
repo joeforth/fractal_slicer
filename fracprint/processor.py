@@ -467,7 +467,7 @@ def shape_prep(filedir, filename, filetype, x_dim, y_dim, inlet_d, x_trans, y_tr
         # print('Bounding box before scaling =', bbox_x, 'mm x', bbox_y, 'mm')
         # print('Bounding box after scaling =', bbox_x_shift + 2*inlet_d, 'mm x', bbox_y_shift, 'mm')
 
-    elif filetype == 'rhino':
+    if filetype == 'rhino':
         df = rhino_preprocess(df)
 
         df, terminal_points, nodes = node_finder(df)
@@ -478,7 +478,7 @@ def shape_prep(filedir, filename, filetype, x_dim, y_dim, inlet_d, x_trans, y_tr
 
         # Correct line order to run in node order
         df = line_order_corrector(df, line_order, line_order_grouped, nodes, node_order_grouped)
-        return df, line_order
+        return df, line_order_grouped 
 
 
 def shapesplitter(df):
