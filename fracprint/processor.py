@@ -10,6 +10,22 @@ import scipy.cluster.hierarchy as hier
 np.seterr(invalid='ignore')   # Suppress divide by zero error
 
 
+def build_settings(filedir, filename, fileout, d, x_offset, y_offset, bed_temperature, floor, roof, f_print):
+    settings = {
+        'filedir': filedir,
+        'filename': filename,
+        'fileout': fileout,
+        'd': d,
+        'x_offset': x_offset,
+        'y_offset': y_offset,
+        'bed_temperature': bed_temperature,
+        'floor': floor,
+        'roof': roof,
+        'f_print': f_print
+}
+    return settings
+
+
 def cartesian2d(x1, y1, x2, y2):
     return math.sqrt((x2 - x1)**2 + (y2 - y1)**2)
 
@@ -126,26 +142,6 @@ def e_calculator(df):
     diameter = 1
     df['E'] = np.pi*alpha*df['distance_from_last']*(diameter/2)**2  # Amount to extrude
     return df
-
-
-def fileread(filedir, filename, filetype):
-    if filetype == 'inkscape':
-        print('Inkscape csv file detected')
-        # Read target wkt/svg file, split into elements
-        with open(os.path.join(filedir, filename)) as f:
-            data = f.read() 
-            data = data.split('\n')
-            data = data[1:len(data)-1]
-
-    elif filetype == 'rhino':
-        print('Rhino csv file detected')
-        data = pd.read_csv(os.path.join(filedir, filename), header=None)
-        data.columns = ['x', 'y', 'z', 'r', 'g', 'b']
-
-    else:
-        print("File type not recognised - please use 'rhino' or 'inkscape'")
-
-    return data
 
 
 def inkscape_preprocess(data):
@@ -278,7 +274,7 @@ def remove_overlap(shape):
     return shape
 
 
-def rhino_preprocess(df):
+def preprocess(df, settings):
     # Calculate the distance between consecutive points
     df = distance_calculator(df)
     # If line ID column doesn't exist, assign line IDs based on RGB values
@@ -299,26 +295,28 @@ def rhino_preprocess(df):
     # Set distance from last to NaN for the first row of each line
     df.loc[df.groupby('line_id').head(1).index, 'distance_from_last'] = np.nan
 
+    df['x'] = df['x'] - df['x'].mean() + settings['x_offset']
+    df['y'] = df['y'] - df['y'].mean() + settings['y_offset']
+
     return df
 
 
-def shape_prep(filedir, filename, filetype='rhino'):
-    # Load pattern data
-    df = fileread(filedir, filename, filetype)
-    # Convert input shape into a DataFrame
+def shape_prep(settings):
+    # Load pattern data and convert to DataFrame
+    df = pd.read_csv(os.path.join(settings['filedir'], settings['filename']), header=None)
+    df.columns = ['x', 'y', 'z', 'r', 'g', 'b']
 
-    if filetype == 'rhino':
-        # if statement is a legacy feature - will be removed
-        df = rhino_preprocess(df)
+    df = preprocess(df, settings)
 
-        df, terminal_points, nodes = node_finder(df)
-        node_plotter(df, terminal_points)
+    # Find and plot nodes via hierarchical clustering
+    df, terminal_points, nodes = node_finder(df)
+    node_plotter(df, terminal_points)
 
-        line_order, node_order, line_order_grouped, node_order_grouped = eulerficator(df, terminal_points, nodes)
+    line_order, node_order, line_order_grouped, node_order_grouped = eulerficator(df, terminal_points, nodes)
 
-        # Correct line order to run in node order
-        df = line_order_corrector(df, line_order, line_order_grouped, nodes, node_order_grouped)
-        return df, line_order_grouped 
+    # Correct line order to run in node order
+    df = line_order_corrector(df, line_order, line_order_grouped, nodes, node_order_grouped)
+    return df, line_order_grouped 
 
 
 def shapesplitter(df):
@@ -536,3 +534,24 @@ def shapesplitter(df):
     
 #     return bbox_x_calc, bbox_y_calc, x_com_calc, y_com_calc, x_min_calc, x_max_calc, y_min_calc, y_max_calc
     
+
+
+# def fileread(filedir, filename, filetype=rhino):
+#     # Legacy code - will be removed
+#     if filetype == 'inkscape':
+#         print('Inkscape csv file detected')
+#         # Read target wkt/svg file, split into elements
+#         with open(os.path.join(filedir, filename)) as f:
+#             data = f.read() 
+#             data = data.split('\n')
+#             data = data[1:len(data)-1]
+
+#     elif filetype == 'rhino':
+#         print('Rhino csv file detected')
+#         data = pd.read_csv(os.path.join(filedir, filename), header=None)
+#         data.columns = ['x', 'y', 'z', 'r', 'g', 'b']
+
+#     else:
+#         print("File type not recognised - please use 'rhino' or 'inkscape'")
+
+#     return data

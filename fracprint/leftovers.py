@@ -328,3 +328,28 @@ def gcode_old(x_all_shift, y_all_shift, res, inlet_d, filename, v, d, exp, dist,
     # Compile all the data down somewhere useful
     # data = pd.DataFrame(np.stack((x_list, y_list, z_list, s_list, E_list), axis=1), columns=['x', 'y', 'z', 's', 'E'])
 
+
+### Old inputs for old method
+# Old calling for previous file formats
+# Offset settings - to be removed
+# x_dim, y_dim = 22., 22.       # x, y dimensions of the container you're printing into
+x_trans, y_trans = 0., 0.    # Distance by which to translate the pattern
+inlet_d = 0.                 # Length of the inlet / outlet ports in mm
+res = 0.01  # Pattern resolution in mm
+# filename = 'test_squiggle_2d.csv'       # Name of the file you're loading
+# filetype = 'inkscape'
+# filetype = 'rhino'
+
+# Leftover settings from previous implementation
+v = 0.25              # cm / s - printhead speed
+d = 1.0               # mm - fibril diameter
+exp = 0.5             # power law exponent in flow decay at end of shape (Suggested value: exp <= 1)
+dist = 0.1             # Distance in mm over which to reduce flow rate
+floor = -61           # Lowest point on print
+roof = -40            # Highest point on print
+preex = 4.0           # Volume to pre-extrude on first shape
+init = 0.0            # Amount to pre-extrude later shapes
+term = 0.0            # Amount to post-extrude
+retract = 0.0         # Amount to retract between shapes
+alpha = 357           # E = \alpha V - value for 1 mm Hamilton gastight syringe
+extrusion_on = True   # True = Extrusion on; False = Extrusion off
