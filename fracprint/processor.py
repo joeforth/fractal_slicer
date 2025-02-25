@@ -10,7 +10,7 @@ import scipy.cluster.hierarchy as hier
 np.seterr(invalid='ignore')   # Suppress divide by zero error
 
 
-def build_settings(filedir, filename, fileout, d, x_offset, y_offset, bed_temperature, floor, roof, f_print):
+def build_settings(filedir, filename, fileout, d, x_offset, y_offset, bed_temperature, floor, z_min, roof, f_print, E_clean):
     settings = {
         'filedir': filedir,
         'filename': filename,
@@ -20,8 +20,10 @@ def build_settings(filedir, filename, fileout, d, x_offset, y_offset, bed_temper
         'y_offset': y_offset,
         'bed_temperature': bed_temperature,
         'floor': floor,
+        'z_min' : z_min,
         'roof': roof,
-        'f_print': f_print
+        'f_print': f_print,
+        'E_clean' : E_clean
 }
     return settings
 
