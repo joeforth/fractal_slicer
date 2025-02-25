@@ -4,12 +4,13 @@ from fracprint import processor
 
 def gcode_writer(df, settings, line_order_grouped):
     # Calculate extrusion amount between points
-
     df_print = e_calculator(df, settings, line_order_grouped)
-    df_print['z'] = df_print['z'] + settings['floor']
-    df_print = df_print.round(3)
+    # Offset path so head doesn't crash into print bed
+    df_print['z'] = df_print['z'] + settings['z_min']
+    df_print = df_print.round(3)   # 3dp max
     # Write sections to file
     preamble(settings)
+    cleaning(settings)
     for path in line_order_grouped:
         position_printhead(df_print, path[0], settings)
         for line_id in path:
@@ -47,12 +48,23 @@ M140 S{} ; set bed temp
 M190 S{} ; wait for bed temp
 G28 ; home all
 G92 E0.0 ; Set zero extrusion
-M107 ; Fan off
-
-G1 X97.5 Y147 F2000 ; Move printhead to centre of printbed
-G92 X0 Y0 E0 ; Set zero extrusion""".format(settings['bed_temperature'], settings['bed_temperature'])
+M107 ; Fan off""".format(settings['bed_temperature'], settings['bed_temperature'])
     with open(settings['fileout'], "w") as file:
         file.write(preamble_out)
+
+
+def cleaning(settings):
+    cleaning_out = """\n
+; Cleaning section
+G1 F800 ; Set speed for cleaning
+G1 X-75 Y75 ; Move to front left corner
+G1 Z{} ; Lower printhead to floor
+G1 X75 Y75 E{} ; Move to front right corner
+G1 Z50 ; Raise printhead
+G1 X97.5 Y147 F2000 ; Move printhead to centre of printbed
+G92 X0 Y0 E0 ; Set zero extrusion""".format(settings['floor'], settings['E_clean'])
+    with open(settings['fileout'], "a") as file:
+        file.write(cleaning_out)
 
 
 def postamble(settings):
