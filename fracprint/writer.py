@@ -57,12 +57,13 @@ def cleaning(settings):
     cleaning_out = """\n
 ; Cleaning section
 G1 F800 ; Set speed for cleaning
-G1 X-75 Y75 ; Move to front left corner
+G1 X-50 Y50 ; Move to front left corner
+G1 F500 ; Slow down to remove vibration
 G1 Z{} ; Lower printhead to floor
-G1 X75 Y75 E{} ; Move to front right corner
-G1 Z50 ; Raise printhead
+G1 X50 Y50 E{} ; Move to front right corner
+G1 Z{} ; Raise printhead
 G1 X97.5 Y147 F2000 ; Move printhead to centre of printbed
-G92 X0 Y0 E0 ; Set zero extrusion""".format(settings['floor'], settings['E_clean'])
+G92 X0 Y0 E0 ; Set zero extrusion""".format(settings['floor'], settings['E_clean'], settings['roof'])
     with open(settings['fileout'], "a") as file:
         file.write(cleaning_out)
 
