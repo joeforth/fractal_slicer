@@ -217,7 +217,7 @@ def validator(unprocessed_lines, df):
 
             inter = test_ls.intersection(comp_ls)
 
-            # --- helper to apply MARMOT rules at a single (x,y) point ---
+            # helper to apply MARMOT rules at a single (x,y) point
             def handle_point(pt):
                 nonlocal is_valid
                 # pt is a shapely Point
@@ -256,7 +256,7 @@ def validator(unprocessed_lines, df):
                     if z_test_10 > z_comp_10 + tol_z_node:
                         is_valid = False
 
-            # --- handle different intersection geometry types ---
+            # handle different intersection geometry types
 
             # Single point
             if isinstance(inter, Point):
@@ -684,10 +684,10 @@ def node_finder(df):
 def node_plotter(df, terminal_points, line_order, node_order, node_order_grouped):
     
 
-    # === Parameters ===
+    # Parameters
     n_interp = 50  # Interpolated points per segment
 
-    # === interpolates line segment ===
+    # interpolates line segment
     def interpolate_line(line_data, n_points=50):
         t = np.linspace(0, 1, len(line_data))
         fx = interp1d(t, line_data['x'], kind='linear')
@@ -696,7 +696,7 @@ def node_plotter(df, terminal_points, line_order, node_order, node_order_grouped
         t_new = np.linspace(0, 1, n_points)
         return np.vstack((fx(t_new), fy(t_new), fz(t_new))).T
 
-    # === terminal edges to line IDs ===
+    # terminal edges to line IDs
     terminal_edges = []
 
     for sublist in node_order_grouped:
@@ -709,7 +709,7 @@ def node_plotter(df, terminal_points, line_order, node_order, node_order_grouped
     edge_to_line = list(zip(terminal_edges, line_order))
     # print("edge to line", edge_to_line)
 
-    # === line segments in correct order and direction ===
+    # line segments in correct order and direction
     # print("Edge to line mapping:")
     
     line_segments = []
@@ -739,14 +739,14 @@ def node_plotter(df, terminal_points, line_order, node_order, node_order_grouped
         pts = interpolate_line(line_data, n_points=n_interp)
         line_segments.append(pts)
 
-    # === frame-to-segment map ===
+    # frame-to-segment map
     segment_lengths = [len(seg) for seg in line_segments]
     frame_to_segment = []
     for i, length in enumerate(segment_lengths):
         frame_to_segment += [(i, j) for j in range(length)]
 
 
-    # === Set up plot ===
+    # Set up plot
     fig = plt.figure(figsize=(10, 8))
     ax = fig.add_subplot(111, projection='3d')
 
@@ -770,7 +770,7 @@ def node_plotter(df, terminal_points, line_order, node_order, node_order_grouped
 
     ax.view_init(elev=30, azim=60)
 
-    # === Assign distinct colors based on jumps ===
+    # Assign distinct colors based on jumps
     distinct_colors = plt.cm.get_cmap('tab10').colors  
     n_colors = len(distinct_colors)
     colors = []
@@ -785,13 +785,13 @@ def node_plotter(df, terminal_points, line_order, node_order, node_order_grouped
             color_index += 1  # New color on jump
         colors.append(distinct_colors[color_index % n_colors])
 
-    # === Line plots ===
+    # Line plots
     plot_lines = [
         ax.plot([], [], [], color=colors[i], linewidth=2)[0]
         for i in range(len(line_segments))
     ]
 
-    # === Line ID labels (initially hidden) ===
+    # Line ID labels (initially hidden)
     line_labels = []
     for i, seg in enumerate(line_segments):
         mid_idx = len(seg) // 2
@@ -801,7 +801,7 @@ def node_plotter(df, terminal_points, line_order, node_order, node_order_grouped
                         color=colors[i], fontsize=10, visible=False)
         line_labels.append(label)
 
-    # === Node labels (initially hidden) ===
+    # Node labels (initially hidden)
     # node_labels = {}
     # for cluster in node_order:
     #     coords = terminal_points[terminal_points['cluster'] == cluster][['x', 'y', 'z']].iloc[0].values
@@ -809,10 +809,10 @@ def node_plotter(df, terminal_points, line_order, node_order, node_order_grouped
     #                     color='black', fontsize=9, visible=False)
     #     node_labels[cluster] = label
 
-    # === Print head (moving marker) ===
+    # Print head (moving marker)
     head, = ax.plot([], [], [], marker='o', color='red', markersize=5)
 
-    # === Animation update function ===
+    # Animation update function
     def update(frame):
         seg_idx, pt_idx = frame_to_segment[frame]
 
@@ -845,7 +845,7 @@ def node_plotter(df, terminal_points, line_order, node_order, node_order_grouped
 
         return plot_lines + [head] + line_labels# + list(node_labels.values())
 
-    # === Animate ===
+    # Animation
     ani = FuncAnimation(
         fig,
         update,
