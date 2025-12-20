@@ -138,7 +138,7 @@ The animation highlights:
 
 ## How to run the slicer
 
-### 1. Clone the repository and install the rquired python modules
+### 1. Clone the repository and install the required python modules
 
 clone https://github.com/joeforth/fractal_slicer.git
 
