@@ -145,7 +145,7 @@ https://github.com/joeforth/fractal_slicer.git
 ### 2. Prepare your vascular network geometry
 Example vascular network created in Rhino
 
-<img width="1779" height="1146" alt="Screenshot 2025-12-20 183119" src="https://github.com/user-attachments/assets/cacd1105-f14a-45fb-b733-3da9ef85f9e8" />
+<img width="900" height="846" alt="Screenshot 2025-12-20 183119" src="https://github.com/user-attachments/assets/cacd1105-f14a-45fb-b733-3da9ef85f9e8" />
 
 
 - Export your vascular network from Rhino as a .txt file
