@@ -78,7 +78,7 @@ Each coloured curve represents a printable line, and the numbered labels show th
 You can already see several geometric limitations being addressed:
 - Some lines sit above others in the Z plane  
 - Multiple lines meet at shallow angles  
-- Printing in a naïve order would cause the nozzle to pass through freshly deposited material  
+- Printing in any order would cause the nozzle to pass through freshly deposited material  
 
 **This is where ordering matters**.
 
