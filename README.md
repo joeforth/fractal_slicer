@@ -174,7 +174,7 @@ settings = processor.build_settings(
 )
 ```
 
-### 5. Run the Slicer
+### 5. Run the slicer
 
 This will:
 
