@@ -31,7 +31,7 @@ When printing vascular networks, lines intersect, overlap, and sit above one ano
 
 Fractal Slicer addresses this by analysing the geometry and determining **which lines are safe to print at each stage**.
 
-At a high level, the algorithm works as follows:
+The algorithm works as follows:
 
 1. Import a 3D vascular network (`.txt` file) exported from Rhino  
 2. Identify junctions (“nodes”) by clustering line endpoints  
@@ -40,7 +40,6 @@ At a high level, the algorithm works as follows:
 5. Output G-code and visualise the resulting print order  
 
 The key idea is that not all lines are safe to print at the same time, even if they exist in the same geometry.
-
 
 
 ## Algorithm overview
@@ -71,7 +70,7 @@ The ordered paths are converted into printer instructions.
 
 The image below shows a typical example of the type of geometry Fractal Slicer operates on.
 
-<img width="562" height="557" alt="Screenshot 2025-12-20 172407" src="https://github.com/user-attachments/assets/69d28d14-23f9-46dc-b894-24f31510be52" />
+<img width="418" height="407" alt="Screenshot 2025-12-20 172407" src="https://github.com/user-attachments/assets/69d28d14-23f9-46dc-b894-24f31510be52" />
 
 
 Each coloured curve represents a printable line, and the numbered labels show the **order in which the algorithm chooses to print them**.
@@ -121,7 +120,10 @@ At this stage, the goal is reliability and interpretability, not the shortest po
 
 ## Animation Assist
 
-The slicer includes an animation tool that shows the **print head moving through the generated path in 3D**.
+The slicer includes an animation tool that shows the **print head moving through the generated path in 3D**:
+
+![Print Path Video](https://github.com/user-attachments/assets/a89baacb-44d9-4d45-923a-9bcfa21936e0)
+
 
 It is encouraged to run the notebook and watch the animation. This makes it easier to connect the theory to the actual behaviour of the algorithm.
 
@@ -141,9 +143,13 @@ The animation highlights:
 https://github.com/joeforth/fractal_slicer.git
 
 ### 2. Prepare your vascular network geometry
+Example vascular network created in Rhino
 
--Export your vascular network from Rhino as a .txt file
--Place the file inside the Rhino/ folder
+<img width="1779" height="1146" alt="Screenshot 2025-12-20 183119" src="https://github.com/user-attachments/assets/cacd1105-f14a-45fb-b733-3da9ef85f9e8" />
+
+
+- Export your vascular network from Rhino as a .txt file
+- Place the file inside the Rhino/ folder
 
 There is already an example network included for a preliminary run: Rhino/3Dblood27.11.txt
 
