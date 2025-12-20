@@ -9,7 +9,7 @@ This project reproduces and extends the **MARMOT algorithm** developed by Ben Wo
 
 
 
-## Why this exists
+## Motivation
 
 In embedded bioprinting, failure often has less to do with the shape itself and more to do with **the order in which the shape is printed**.
 
