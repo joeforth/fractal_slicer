@@ -71,6 +71,9 @@ The ordered paths are converted into printer instructions.
 
 The image below shows a typical example of the type of geometry Fractal Slicer operates on.
 
+<img width="562" height="557" alt="Screenshot 2025-12-20 172407" src="https://github.com/user-attachments/assets/69d28d14-23f9-46dc-b894-24f31510be52" />
+
+
 Each coloured curve represents a printable line, and the numbered labels show the **order in which the algorithm chooses to print them**.
 
 You can already see several geometric limitations being addressed:
