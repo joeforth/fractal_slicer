@@ -138,9 +138,17 @@ The animation highlights:
 
 ## How to run the slicer
 
-### 1. Clone the repository
+### 1. Clone the repository and install the rquired python modules
 
-https://github.com/joeforth/fractal_slicer.git
+clone https://github.com/joeforth/fractal_slicer.git
+
+**Required modules:**
+numpy
+pandas
+scipy
+matplotlib
+shapely
+
 
 ### 2. Prepare your vascular network geometry
 Example vascular network created in Rhino
