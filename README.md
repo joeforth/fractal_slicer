@@ -143,12 +143,16 @@ The animation highlights:
 clone https://github.com/joeforth/fractal_slicer.git
 
 **Required modules:**
-numpy
-pandas
-scipy
-matplotlib
-shapely
 
+numpy
+
+pandas
+
+scipy
+
+matplotlib
+
+shapely
 
 ### 2. Prepare your vascular network geometry
 Example vascular network created in Rhino
