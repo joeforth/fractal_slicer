@@ -206,7 +206,7 @@ These must be determined for the printer in use to ensure safe operation and avo
 ```python
 settings = processor.build_settings(
     filedir='./Rhino/',
-    filename='3Dblood27.11.txt',
+    filename='exported_design_file.txt',
     fileout='output.gcode',
     d=0.8,
     x_offset=0,
