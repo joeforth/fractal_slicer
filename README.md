@@ -188,7 +188,7 @@ Example vascular network created in Rhino
 - Export your vascular network from Rhino as a .txt file
 - Place the file inside the Rhino/ folder
 
-There is already an example network included for a preliminary run: Rhino/3Dblood27.11.txt
+There is already an example network included for a preliminary run: newvesselbranched.txt
 
 ### 3. Run the notebook
 
@@ -206,7 +206,7 @@ These must be determined for the printer in use to ensure safe operation and avo
 ```python
 settings = processor.build_settings(
     filedir='./Rhino/',
-    filename='exported_design_file.txt',
+    filename='newvesselbranched.txt',
     fileout='output.gcode',
     d=0.8,
     x_offset=0,
