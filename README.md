@@ -64,7 +64,32 @@ A modified **Euler / Fleury** algorithm is used to group valid lines into contin
 ### ➤ Write G-code  
 The ordered paths are converted into printer instructions.
 
+## Addressing Different Processor Versions
 
+The repository contains several variations of processor/writer developed during experimentation with different path planning strategies.
+
+These versions were intentionally kept separate rather than merged into a single processor, as each explores different approaches to improving print fidelity. The implementations were independently applied and evaluated. Keeping the versions separate also allows future users to access all implementations directly, choose what is most suitable for their application, and combine or discard features if they wish through further experimentation.
+
+`version_debugged` should be treated as the main development version, as it was developed as a consequence of encountered errors and supports processing of a wider range of geometry complexity.
+
+| Version | Purpose |
+|---|---|
+| `baseline` | Main reference implementation of the MARMOT-style workflow using graph validation and modified Euler-style traversal for continuous print-path grouping |
+| `node_nudge` | Implements local node overshoot corrections by displacing points near junctions towards shared node coordinates to improve physical filament intersection and node connectivity |
+| `retract` | Implements reverse extrusion to reduce stringing and unintended material deposition during nozzle lifts |
+| `chinese_postman` | Implements an open Chinese Postman formulation with shortest-path edge augmentation and non-extruding traversal along existing vessel geometry to reduce nozzle retractions and maintain continuous traversal of non-Eulerian vascular networks |
+
+Some versions also use different internal path representations.
+
+For example:
+- older versions store paths as lists of `line_id`s
+- newer versions such as version_retract may store paths as segment dictionaries containing:
+
+```python
+{"line_id": 4, "reverse": True, "extrude": False}
+```
+
+As a result, processors and writers from different versions may not always work together without modification.
 
 ## Visualisation of print paths
 
@@ -127,7 +152,7 @@ The slicer includes an animation tool that shows the **print head moving through
 
 It is encouraged to run the notebook and watch the animation. This makes it easier to connect the theory to the actual behaviour of the algorithm.
 
-Running the animation is often the fastest way to understand why a particular print order was chosen.
+Running the animation is often the fastest way to understand why a particular print order was chosen. Animation behaviour may differ between processor versions. For example, the Chinese Postman implementation includes non-extruding traversal, repeated edges, and directional segment traversal, which changes how nozzle motion is represented during animation.
 
 The animation highlights:
 - When the nozzle revisits a node  
