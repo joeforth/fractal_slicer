@@ -74,7 +74,7 @@ These versions were intentionally kept separate rather than merged into a single
 
 | Version | Purpose |
 |---|---|
-| `baseline` | Main reference implementation of the MARMOT-style workflow using graph validation and modified Euler-style traversal for continuous print-path grouping |
+| `debugged` | Implementation of the MARMOT-style workflow using graph validation and modified Euler-style traversal for continuous print-path grouping |
 | `node_nudge` | Implements local node overshoot corrections by displacing points near junctions towards shared node coordinates to improve physical filament intersection and node connectivity |
 | `retract` | Implements reverse extrusion to reduce stringing and unintended material deposition during nozzle lifts |
 | `chinese_postman` | Implements an open Chinese Postman formulation with shortest-path edge augmentation and non-extruding traversal along existing vessel geometry to reduce nozzle retractions and maintain continuous traversal of non-Eulerian vascular networks |
