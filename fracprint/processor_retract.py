@@ -11,6 +11,10 @@ from mpl_toolkits.mplot3d import Axes3D
 from matplotlib.animation import FuncAnimation
 import matplotlib.cm as cm
 import numpy as np
+
+
+def _flatten(grouped):
+    return [item for sublist in grouped for item in sublist]
 from scipy.spatial import distance as dist
 import scipy.cluster.hierarchy as hier
 from scipy.interpolate import interp1d
@@ -19,8 +23,26 @@ import copy
 np.seterr(invalid='ignore')  # Suppress divide by zero error
 
 
-def build_settings(filedir, filename, fileout, d, x_offset, y_offset, bed_temperature, floor, z_min, roof, f_print,
-                   E_clean):
+def build_settings(
+        filedir, filename, fileout,
+        d, x_offset, y_offset,
+        bed_temperature, floor, z_min, roof,
+        f_print, E_clean,
+        retract_on_lift=False,
+        E_retract=0.0,
+        F_retract=600,
+        lift_clearance=5.0,
+        unretract_before_print=True
+    ):
+    """Build a settings dict for the slicer.
+
+    Retraction options (embedded printing):
+      - retract_on_lift: retract while lifting out of the bath at path ends
+      - E_retract: relative retract amount (in your extruder's E-units)
+      - F_retract: retract feedrate
+      - lift_clearance: extra Z clearance added to current max printed Z
+      - unretract_before_print: prime back before starting the next path
+    """
     settings = {
         'filedir': filedir,
         'filename': filename,
@@ -33,7 +55,14 @@ def build_settings(filedir, filename, fileout, d, x_offset, y_offset, bed_temper
         'z_min': z_min,
         'roof': roof,
         'f_print': f_print,
-        'E_clean': E_clean
+        'E_clean': E_clean,
+
+        # Retraction / lift behaviour
+        'retract_on_lift': retract_on_lift,
+        'E_retract': E_retract,
+        'F_retract': F_retract,
+        'lift_clearance': lift_clearance,
+        'unretract_before_print': unretract_before_print
     }
     return settings
 
@@ -64,14 +93,29 @@ def coordinater_wkt(string_in, idx):
 
 
 def distance_calculator(df):
-    # Drop NaN values (usually the first value)
+    """Compute distance_from_last safely.
+
+    If df contains a 'line_id' column, distances are computed *within each line_id*
+    (so we don't accidentally measure distance between the last point of one line
+    and the first point of the next).
+    """
+    def _within(g):
+        dx = g['x'].diff()
+        dy = g['y'].diff()
+        dz = g['z'].diff()
+        g['distance_from_last'] = np.sqrt(dx ** 2 + dy ** 2 + dz ** 2)
+        # First point of each line has no previous point
+        g.iloc[0, g.columns.get_loc('distance_from_last')] = np.nan
+        return g
+
+    if 'line_id' in df.columns:
+        return df.groupby('line_id', group_keys=False).apply(_within)
+
     dx = df['x'].diff()
     dy = df['y'].diff()
     dz = df['z'].diff()
-
-    # Calculate the Euclidean distance between consecutive rows
-    distances = np.sqrt(dx ** 2 + dy ** 2 + dz ** 2)
-    df['distance_from_last'] = distances
+    df['distance_from_last'] = np.sqrt(dx ** 2 + dy ** 2 + dz ** 2)
+    df.iloc[0, df.columns.get_loc('distance_from_last')] = np.nan
     return df
 def select_min_key(d):
     # Step 1: Keys with odd-length lists
@@ -167,186 +211,159 @@ def z_tenth_from_intersection_calculator(intersection, df, line_string):
     z_value = interpolated_z(z_point, df)
     return z_value
 
-def validator(unprinted_lines, df):
-    """"Checks if the printing of each line affects the printing of future lines and returns those that are able to be printed without affecting the printing of subsequent lines"""
+import numpy as np
+from shapely.geometry import GeometryCollection, LineString, Point, MultiPoint, MultiLineString
 
+def validator(unprocessed_lines, df):
+    """
+    MARMOT-style validator.
+
+    For each candidate line (test_id), compare it to all other unprocessed lines:
+      1) At any XY intersection, if the test line is higher than the other line
+         by more than tol_z, the test line is invalid.
+      2) If they meet at (almost) the same height and the in-plane angle between
+         them is shallow (< angle_thresh), look 1/10 of the line length away
+         from the intersection on both lines; if the test line is higher there
+         by more than tol_z_node, it is invalid.
+    """
+
+    tol_z = 0.03        # main height tolerance (mm)
+    tol_z_node = 0.03   # node / 1/10th height tolerance (mm)
+    angle_thresh = 10.0 # degrees
     valid_lines = []
-    # print(f"checking {len(unprinted_lines)}")
-    for line_id_test in unprinted_lines:
-        # print(f"test line{line_id_test}")
-        is_valid = True  # assume valid until proven otherwise
 
-        current_line_coords = df[df["line_id"] == line_id_test][["x", "y"]]
-        current_line_xyz = df[df["line_id"] == line_id_test][["x", "y", "z"]]
-        current_line_linestring = LineString(current_line_coords.to_numpy())
+    # unprocessed_lines is assumed to be a list of line_ids (ints)
+    for test_id in unprocessed_lines:
+        # Extract this line's data
+        test_df = df[df["line_id"] == test_id][["x", "y", "z"]].copy()
+        if len(test_df) < 2:
+            # skip degenerate lines
+            continue
 
-        if len(current_line_coords) < 2:
-            print(f"line skipped too short{line_id_test}")
-            continue  # skip invalid lines
+        test_ls = LineString(test_df[["x", "y"]].to_numpy())
+        is_valid = True
 
-        for line_id in unprinted_lines:
-            
-            if line_id == line_id_test:
-                # print("line id == line id test")
+        for comp_id in unprocessed_lines:
+            if comp_id == test_id:
+                continue
+            if not is_valid:
+                break
+
+            comp_df = df[df["line_id"] == comp_id][["x", "y", "z"]].copy()
+            if len(comp_df) < 2:
                 continue
 
-            compared_line_coords = df[df["line_id"] == line_id][["x", "y"]]
-            compared_line_xyz = df[df["line_id"] == line_id][["x", "y", "z"]]
-            # print("compared line coords generated")
+            comp_ls = LineString(comp_df[["x", "y"]].to_numpy())
 
-            if len(compared_line_coords) < 2:
-                # print(f"compared line too short line id {line_id}")
+            # Only care if they intersect in XY
+            if not test_ls.intersects(comp_ls):
                 continue
 
-            compared_line_linestring = LineString(compared_line_coords.to_numpy())
-            # print("compared line string generated")
+            inter = test_ls.intersection(comp_ls)
 
-            if current_line_linestring.intersects(compared_line_linestring):
-                intersection = current_line_linestring.intersection(compared_line_linestring)
+            # helper to apply MARMOT rules at a single (x,y) point
+            def handle_point(pt):
+                nonlocal is_valid
+                # pt is a shapely Point
+                coord = (pt.x, pt.y)
 
-                # print(f"test line{line_id_test}intersects with line {line_id} at {intersection}")
-                if isinstance(intersection, (GeometryCollection, MultiLineString)):
-                    leng_parallel = sum(1 for g in intersection.geoms if isinstance(g, LineString))
-                    if leng_parallel>2:
-                        for geometry in intersection.geoms:
-                            if geometry.geom_type == "LineString":
-                                try:
-                                    current_z_atparallel = current_line_xyz.iloc[min(20, len(current_line_xyz)-1)]["z"]
-                                    compared_z_atparallel = compared_line_xyz.iloc[min(20, len(compared_line_xyz)-1)]["z"]
-                                    # print(f"current line z at linestring(parallel intersection){current_z_atparallel} compared z at angle{compared_z_atparallel}")
-                                except IndexError:
-                                    print("index error occured")
-                                    continue  # skip if not enough points
+                z_test = interpolated_z(coord, test_df)
+                z_comp = interpolated_z(coord, comp_df)
+                if z_test is None or z_comp is None:
+                    return
 
-                                if current_z_atparallel > compared_z_atparallel + 0.03:
-                                    is_valid = False
-                                    # print(f"INVALID current z above compared z")
-                                    break
-                    else:
-                        for geometry in intersection.geoms:
-                            if isinstance(geometry, LineString):
-                                for coord in geometry.coords:
-                                    z_current = interpolated_z(coord, current_line_xyz)
-                                    z_compare = interpolated_z(coord, compared_line_xyz)
-                                    # print(f"zvalues of current{z_current} and compare{z_compare}")
-                                    if np.isclose(z_current, z_compare, rtol=2e-02, atol=1e-08):
-                                        angle = angle_calculator(current_line_linestring, compared_line_linestring, Point(coord))
-                                        # print(f"angle between lines{angle} test line ={line_id_test} compared line = {line_id}")
-                                        if (0.02 < angle < 25) or (-0.02 > angle > -25):
-                                            if line_id_test == 1:
-                                                # print("line id test is 1")
-                                                # print("current line linestring", current_line_linestring)
-                                                # print("compared line linestring", compared_line_linestring)
-                                                try:
-                                                    current_z_at20 = z_tenth_from_intersection_calculator(coord, df,current_line_linestring)
+                dz = z_test - z_comp
 
-                                                    compared_z_at20 = z_tenth_from_intersection_calculator(coord, df,compared_line_linestring)
+                # Case A: different height → test line must not be above future line
+                if abs(dz) > tol_z:
+                    if dz > tol_z:
+                        is_valid = False
+                    return
 
-                                                    # print(
-                                                    #     f"current line z at angle{current_z_at20} compared z at angle{compared_z_at20}")
-                                                except IndexError:
-                                                    print("index error occured")
-                                                    continue  # skip if not enough points
+                # Case B: effectively same height → treat as node-type intersection
+                # apply angle rule + 1/10-length z check
+                angle = angle_calculator(test_ls, comp_ls, pt)
 
-                                            if current_z_at20 >= compared_z_at20 + 0.03:
-                                                is_valid = False
-                                                # print(f"INVALID current z above compared z")
-                                                break
-                                        else:
-                                            continue  # no disqualification
-                                            print("not at node")
-                                    else:
-                                        if z_current >= z_compare:
-                                            is_valid = False
-                                            # print("INVALID z value of current line is above compared line")
-                                            break
-                if isinstance(intersection, LineString):
-                    for coord in intersection.coords:
-                        z_current = interpolated_z(coord, current_line_xyz)
-                        z_compare = interpolated_z(coord, compared_line_xyz)
-                        # print(f"zvalues of current{z_current} and compare{z_compare}")
-                        if np.isclose(z_current, z_compare, rtol=2e-02, atol=1e-08):
-                            angle = angle_calculator(current_line_linestring, compared_line_linestring, Point(coord))
-                            # print(f"angle between lines{angle} test line ={line_id_test} compared line = {line_id}")
-                            if (0.02 < angle < 25) or (-0.02 > angle > -25):
-                                try:
-                                    current_z_at20 = z_tenth_from_intersection_calculator(Point(coord), df,
-                                                                                          current_line_linestring)
+                # only shallow angles are problematic
+                if abs(angle) < angle_thresh:
+                    try:
+                        z_test_10 = z_tenth_from_intersection_calculator(
+                            pt, test_df, test_ls
+                        )
+                        z_comp_10 = z_tenth_from_intersection_calculator(
+                            pt, comp_df, comp_ls
+                        )
+                    except Exception:
+                        # if we can't sample 1/10th points, just skip this point
+                        return
 
-                                    compared_z_at20 = z_tenth_from_intersection_calculator(Point(coord), df,
-                                                                                           compared_line_linestring)
+                    if z_test_10 > z_comp_10 + tol_z_node:
+                        is_valid = False
 
-                                    # print(
-                                    #     f"current line z at angle{current_z_at20} compared z at angle{compared_z_at20}")
-                                except IndexError:
-                                    # print("index error occured")
-                                    continue  # skip if not enough points
+            # handle different intersection geometry types
 
-                                if current_z_at20 >= compared_z_at20 + 0.03:
-                                    is_valid = False
-                                    # print(f"INVALID current z above compared z")
-                                    break
-                            else:
-                                continue  # no disqualification
-                                print("not at node")
-                        else:
-                            if z_current >= z_compare:
-                                is_valid = False
-                                # print("INVALID z value of current line is above compared line")
-                                break
+            # Single point
+            if isinstance(inter, Point):
+                handle_point(inter)
 
+            # Multiple discrete points
+            elif isinstance(inter, MultiPoint):
+                for pt in inter.geoms:
+                    handle_point(pt)
+                    if not is_valid:
+                        break
 
+            # Single overlapping segment
+            elif isinstance(inter, LineString):
+                coords = list(inter.coords)
+                # sample a few points along the overlap
+                step = max(1, len(coords) // 5)
+                for x, y in coords[::step]:
+                    handle_point(Point(x, y))
+                    if not is_valid:
+                        break
 
-                if intersection.geom_type == "Point":
-                    z_current = interpolated_z(intersection, current_line_xyz)
-                    z_compare = interpolated_z(intersection, compared_line_xyz)
-                    # print(f"zvalues of current{z_current} and compare{z_compare}")
-                    if np.isclose(z_current, z_compare, rtol=2e-02, atol=1e-08):
-                        angle = angle_calculator(current_line_linestring, compared_line_linestring, intersection)
-                        # print(f"angle between lines{angle} test line ={line_id_test} compared line = {line_id}")
-                        if (0.02 < angle < 25) or (-0.02> angle> -25):
-                            try:
-                                current_z_at20 = z_tenth_from_intersection_calculator(intersection, df, current_line_linestring)
-                                compared_z_at20 = z_tenth_from_intersection_calculator(intersection, df, compared_line_linestring)
-                                # print(f"current line z at angle{current_z_at20} compared z at angle{compared_z_at20}")
-                            except IndexError:
-                                # print("index error occured")
-                                continue  # skip if not enough points
-
-                            if current_z_at20 >= compared_z_at20 + 0.03:
-                                is_valid = False
-                                # print(f"INVALID current z above compared z")
-                                break
-                        else:
-                            continue  # no disqualification
-                            print("not at node")
-                    else:
-                        if z_current >= z_compare:
-                            is_valid = False
-                            # print("INVALID z value of current line is above compared line")
-                            break
-
-                elif intersection.geom_type == "MultiPoint":
-                    # print("multipoint")
-                    for pt in intersection.geoms:
-                        z_current = interpolated_z(pt, current_line_xyz)
-                        # print(z_current,"z_current")
-                        z_compare = interpolated_z(pt, compared_line_xyz)
-                        # print(z_compare, "z_compare")
-                        if z_current > z_compare + 0.07:
-                            is_valid = False
-                            # print("INVALID not valid")
+            # Multiple overlapping segments
+            elif isinstance(inter, MultiLineString):
+                for geom in inter.geoms:
+                    coords = list(geom.coords)
+                    step = max(1, len(coords) // 5)
+                    for x, y in coords[::step]:
+                        handle_point(Point(x, y))
+                        if not is_valid:
                             break
                     if not is_valid:
-                        
                         break
-            
+
+            # Mixed geometry
+            elif isinstance(inter, GeometryCollection):
+                for geom in inter.geoms:
+                    if isinstance(geom, Point):
+                        handle_point(geom)
+                    elif isinstance(geom, LineString):
+                        coords = list(geom.coords)
+                        step = max(1, len(coords) // 5)
+                        for x, y in coords[::step]:
+                            handle_point(Point(x, y))
+                            if not is_valid:
+                                break
+                    if not is_valid:
+                        break
 
         if is_valid:
-            valid_lines.append(line_id_test)
+            valid_lines.append(test_id)
+
     print("valid lines", valid_lines)
     return valid_lines
+
+
 def node_connectivity_finder(dictionary):
+    """
+    Build a node-connectivity dictionary from a mapping:
+        cluster_id -> list of line_ids.
+    For each node (cluster), list which other nodes it connects to
+    (with multiplicity based on the number of shared lines).
+    """
     new_dictionary = {}
 
     for key1, values1 in dictionary.items():
@@ -364,21 +381,29 @@ def node_connectivity_finder(dictionary):
 
         new_dictionary[key1] = shared_keys
 
-
     return new_dictionary
-def line_from_nodes(start_node, end_node,valid_line_cluster_dict):
-    end_node_list= valid_line_cluster_dict[end_node]
+
+
+def line_from_nodes(start_node, end_node, valid_line_cluster_dict):
+    """
+    Given two nodes (clusters), return the line_id that connects them.
+    Assumes exactly one line is shared.
+    """
+    end_node_list = valid_line_cluster_dict[end_node]
     start_node_list = valid_line_cluster_dict[start_node]
     shared_lines = [item for item in start_node_list if item in end_node_list]
     return shared_lines[0]
+
 
 def remove_line(valid_line_cluster_dict, start_node, next_node, line):
     valid_line_cluster_dict[start_node].remove(line)
     valid_line_cluster_dict[next_node].remove(line)
 
+
 def remove_node(valid_node_link_dict, u, v):
     valid_node_link_dict[u].remove(v)
     valid_node_link_dict[v].remove(u)
+
 
 def depth_first_search(next_node, valid_node_link_dict, visited):
     visited[next_node] = True
@@ -387,104 +412,136 @@ def depth_first_search(next_node, valid_node_link_dict, visited):
         if not visited[neighbor]:
             depth_first_search(neighbor, valid_node_link_dict, visited)
 
-def bridge_check(next_node, start_node, valid_node_link_dict,node_number):
-    if len(valid_node_link_dict[start_node]) == 1:
-        return True, 0
-    node_link_copy = copy.deepcopy(valid_node_link_dict)
-    visited = {key:False for key in node_link_copy}
-    count1 = 0
-    depth_first_search(next_node, node_link_copy, visited)
-    count1 = sum(1 for value in visited.values() if value is True)
 
+def bridge_check(next_node, start_node, valid_node_link_dict, node_number):
+    """
+    Check whether removing the edge (start_node, next_node) would disconnect
+    the graph (i.e. whether it's a bridge).
+    """
+    if len(valid_node_link_dict[start_node]) == 1:
+        # If there's only one connection, we have to take it
+        return True, 0
+
+    node_link_copy = copy.deepcopy(valid_node_link_dict)
+    visited = {key: False for key in node_link_copy}
+
+    depth_first_search(next_node, node_link_copy, visited)
+    count1 = sum(1 for value in visited.values() if value)
+
+    # Remove edge and see how many nodes remain reachable
     remove_node(node_link_copy, start_node, next_node)
 
-    visited = {key:False for key in node_link_copy }
-    count2 = 0
+    visited = {key: False for key in node_link_copy}
     depth_first_search(start_node, node_link_copy, visited)
-    count2 = sum(1 for value in visited.values() if value is True)
+    count2 = sum(1 for value in visited.values() if value)
 
+    # Restore edge in the copy (not strictly needed but tidy)
     node_link_copy[start_node].append(next_node)
     node_link_copy[next_node].append(start_node)
-    # print("count 1", count1, "count2", count2)
-    # print(f"Returning from bridge_check: {(count1 == count2, count2)}")
-    return (count1 == count2), count2
-def recursive_eulerian(node_path, edges, start_node, valid_node_link_dict, node_number, valid_line_cluster_dict):
-    if not valid_node_link_dict.get(start_node):
-        # print(f"No more connections from {start_node}. Ending recursion.")
-        return
-    any_bridge_passed = False
 
+    return (count1 == count2), count2
+
+
+def recursive_eulerian(
+    node_path,
+    edges,
+    start_node,
+    valid_node_link_dict,
+    node_number,
+    valid_line_cluster_dict,
+):
+    """
+    Recursive part of Fleury's algorithm to build an Eulerian path.
+    """
+    if not valid_node_link_dict.get(start_node):
+        return
+
+    any_bridge_passed = False
     count2_map = {}
 
     for node in valid_node_link_dict[start_node]:
-        # print(valid_node_link_dict[start_node], "valid node connections dictionary")
-        next_node= node
-        # print(next_node, "next node")
-        passed_bridge, count2 = bridge_check(next_node, start_node, valid_node_link_dict, node_number)
+        next_node = node
+        passed_bridge, count2 = bridge_check(
+            next_node, start_node, valid_node_link_dict, node_number
+        )
         if count2 is not None:
             count2_map[next_node] = count2
         if passed_bridge:
             any_bridge_passed = True
             if start_node == node_path[-1]:
-                # print(node_path, "node path if passed bridge")
-                # print(start_node, "start node", next_node, "next node")
                 line = line_from_nodes(start_node, next_node, valid_line_cluster_dict)
                 edges.append(line)
-                # print("appending line", line)
                 node_path.append(next_node)
                 remove_node(valid_node_link_dict, start_node, next_node)
                 remove_line(valid_line_cluster_dict, start_node, next_node, line)
-                #repeat with start node as the next node
-                recursive_eulerian(node_path, edges, next_node, valid_node_link_dict, node_number, valid_line_cluster_dict)
+                recursive_eulerian(
+                    node_path,
+                    edges,
+                    next_node,
+                    valid_node_link_dict,
+                    node_number,
+                    valid_line_cluster_dict,
+                )
                 break
+
     if not any_bridge_passed:
         if count2_map:
             next_node = min(count2_map, key=count2_map.get)
         else:
-
             next_node = valid_node_link_dict[start_node][0]
+
         if start_node == node_path[-1]:
-            # print(node_path, "node path from no bridge passed")
-            # print(edges, "edges from no bridge passed")
             line = line_from_nodes(start_node, next_node, valid_line_cluster_dict)
-            # print(start_node, "start node", next_node, "end node from no bridge passed")
             edges.append(line)
-            # print("appending line", line)
             node_path.append(next_node)
             remove_node(valid_node_link_dict, start_node, next_node)
             remove_line(valid_line_cluster_dict, start_node, next_node, line)
-            # repeat with start node as the next node
-            recursive_eulerian(node_path, edges, next_node, valid_node_link_dict, node_number, valid_line_cluster_dict)
+            recursive_eulerian(
+                node_path,
+                edges,
+                next_node,
+                valid_node_link_dict,
+                node_number,
+                valid_line_cluster_dict,
+            )
 
 
-def fleurys_algorithm(clusters, cluster_dictionary, connectivity_dictionary, valid_lines, edges_grouped, node_path_grouped):
-    valid_line_cluster_dict= {}
+def fleurys_algorithm(
+    clusters, cluster_dictionary, connectivity_dictionary, valid_lines,
+    edges_grouped, node_path_grouped
+):
+    """
+    Apply Fleury's algorithm cluster-by-cluster to build Eulerian paths
+    that respect the set of currently valid lines.
+    """
+    valid_line_cluster_dict = {}
 
     for cluster, lines in cluster_dictionary.items():
         valid_line_cluster_dict[cluster] = [item for item in lines if item in valid_lines]
 
     valid_node_link_dict = node_connectivity_finder(valid_line_cluster_dict)
-    # print(valid_node_link_dict)
 
     while valid_line_cluster_dict:
         node_number = len(valid_node_link_dict)
 
-        filtered = {k: v for k, v in valid_node_link_dict.items() if v not in ('', None,[])}
-        # print(filtered)
-        if filtered:
-            min_key = select_min_key(filtered)
+        filtered = {
+            k: v for k, v in valid_node_link_dict.items()
+            if v not in ("", None, [])
+        }
 
+        if filtered:
+            start_node = select_min_key(filtered)
         else:
-            # print("No valid entries")
+            # no usable nodes remain
             break
-        start_node = min_key
-        # print(start_node, "start node")
+
         node_path = []
         edges = []
         node_path.append(start_node)
-        recursive_eulerian(node_path, edges, start_node, valid_node_link_dict, node_number, valid_line_cluster_dict)
-        # print(edges, "edges")
-        # print(node_path, "node path")
+        recursive_eulerian(
+            node_path, edges, start_node,
+            valid_node_link_dict, node_number, valid_line_cluster_dict
+        )
         edges_grouped.append(edges)
         node_path_grouped.append(node_path)
 
@@ -493,83 +550,125 @@ def fleurys_algorithm(clusters, cluster_dictionary, connectivity_dictionary, val
 
 
 
-
-
-
 def eulerficator(df, terminal_points, nodes):
+    """
+    Top-level function that:
+    - builds cluster+connectivity dictionaries,
+    - repeatedly uses the validator + Fleury's algorithm
+      to group lines into printable paths,
+    - returns the final line / node ordering.
+
+    Loopfix3/4-style behaviour:
+    - Uses ALL line_ids present in df (not just terminal_points).
+    - Never aborts early when valid_lines == []: it force-schedules the next
+      unprinted line (bottom-up) to guarantee full geometry.
+    - Detects lack of progress and forces a fallback to avoid infinite loops.
+    """
     terminal_points_nogroups = terminal_points.reset_index()
-    clusters = terminal_points_nogroups['cluster'].unique()
-    lines = terminal_points_nogroups['line_id'].unique()
-    # print(terminal_points)
-    # print("----------")
-    # print(terminal_points_nogroups)
-    # print(nodes)
-    # print(df)
-    # Run through each cluster and create two dictionaries
-    # 1 - cluster numbers as key and the connecting lines as values
-    # 2 - cluster numbers as key and the number of connecting nodes as values
+
+    # Keep cluster/connectivity dictionaries based on detected terminals
+    clusters = terminal_points_nogroups["cluster"].unique()
+
+    # IMPORTANT: schedule over all lines in df
+    lines = df["line_id"].unique()
+
     cluster_dict = {}
     connectivity_dict = {}
-
     for c in clusters:
-        connecting_lines = terminal_points_nogroups[terminal_points_nogroups['cluster'] == c]
-        cluster_dict[c] = list(connecting_lines['line_id'].values)
-
+        connecting_lines = terminal_points_nogroups[
+            terminal_points_nogroups["cluster"] == c
+        ]
+        cluster_dict[c] = list(connecting_lines["line_id"].values)
         connectivity_dict[c] = len(connecting_lines)
-    # print("cluster_dict")
-    # print(cluster_dict)
-    # print("connectivity_dict")
-    # print(connectivity_dict)
-    # print("terminal_points_nogroups")
-    # print(terminal_points_nogroups)
-    # print("terminal_points")
-    # print(terminal_points)
-    # print("clusters")
-    # print(clusters)
-    # print("lines")
-    # print(lines)
-
-
-
 
     edges_grouped = []
-
     node_path_grouped = []
+
+    # Sort lines by min z -> bottom up (used for force-scheduling)
+    min_z = df.groupby("line_id")["z"].min()
+    heightsorted_line_ids = min_z.sort_values().index.tolist()
+
+    # Safety cap (should not be hit if progress logic works)
+    max_iterations = max(10, len(lines) * 5)
+    it = 0
+
     while sum(len(sublist) for sublist in edges_grouped) < len(lines):
+        it += 1
+        if it > max_iterations:
+            print("Safety break triggered in eulerficator().")
+            break
 
+        edges_ungrouped = [item for sublist in edges_grouped for item in sublist]
+        printed_set = set(edges_ungrouped)
 
-        # Sort lines by height order - bottom up
-        min_z = df.groupby('line_id')['z'].min()
-        heightsorted_line_ids = min_z.sort_values().index.tolist()
-        edges_ungrouped = flattened_edges = [item for sublist in edges_grouped for item in sublist]
-        unprinted_lines = [n for n in heightsorted_line_ids if n not in edges_ungrouped]
-        # print(df)
-        
+        unprinted_lines = [n for n in heightsorted_line_ids if n not in printed_set]
+        if not unprinted_lines:
+            break
+
+        # Progress snapshot BEFORE attempting Fleury
+        printed_before = set(printed_set)
 
         valid_lines = validator(unprinted_lines, df)
+
+        # If validator says nothing is printable, force-schedule next unprinted line
         if not valid_lines:
-            print("No valid lines found. Breaking to avoid infinite loop.")
-            break  # prevents infinite loop
+            fallback_line = int(unprinted_lines[0])
+            if fallback_line not in printed_set:
+                edges_grouped.append([fallback_line])
+                node_path_grouped.append([])  # no guaranteed node path
+                print(
+                    f"No valid lines; forcing print of line {fallback_line} "
+                    "to guarantee full geometry."
+                )
+            continue
 
-        fleurys_algorithm(clusters, cluster_dict, connectivity_dict, valid_lines, edges_grouped, node_path_grouped)
+        fleurys_algorithm(
+            clusters, cluster_dict, connectivity_dict,
+            valid_lines, edges_grouped, node_path_grouped
+        )
 
-        while len(valid_lines)>0:
-            next_line = valid_lines[0]
-            valid_lines = valid_lines[1:]  # Remove the printed line from the list of remaining lines
-            unprinted_lines.remove(next_line)
+        # Progress snapshot AFTER Fleury
+        printed_after = set([item for sublist in edges_grouped for item in sublist])
+        newly_printed = printed_after - printed_before
 
+        # If no progress, force-schedule a valid line to break deadlock
+        if not newly_printed:
+            fallback_line = int(valid_lines[0])
+            if fallback_line not in printed_after:
+                edges_grouped.append([fallback_line])
+                node_path_grouped.append([])
+                print(
+                    f"Fleury made no progress; forcing print of line {fallback_line} "
+                    "to prevent infinite loop."
+                )
+            continue
 
+    # Flatten for outputs
     node_order = [item for sublist in node_path_grouped for item in sublist]
-    print(node_order,"node order")
     line_order = [item for sublist in edges_grouped for item in sublist]
-    print(line_order, "line order")
-    line_order_grouped = edges_grouped
-    print("line order grouped", line_order_grouped)
-    node_order_grouped = node_path_grouped
-    print("node order grouped", node_order_grouped) 
-    # node_plotter(shapesplitter(df), terminal_points, line_order, node_order)
-    return line_order, node_order, line_order_grouped, node_order_grouped
 
+    # Final dedupe safeguard (never schedule same line_id twice)
+    seen = set()
+    clean_grouped = []
+    for path in edges_grouped:
+        p2 = []
+        for lid in path:
+            lid = int(lid)
+            if lid not in seen:
+                p2.append(lid)
+                seen.add(lid)
+        if p2:
+            clean_grouped.append(p2)
+
+    line_order_grouped = clean_grouped
+    node_order_grouped = node_path_grouped
+
+    # Final audit
+    missing = sorted(set(lines) - set(_flatten(line_order_grouped)))
+    if missing:
+        print("WARNING: Some lines were not scheduled for printing:", missing)
+
+    return line_order, node_order, line_order_grouped, node_order_grouped
 def e_calculator(df):
     alpha = 1
     diameter = 1
@@ -597,27 +696,55 @@ def inkscape_preprocess(data):
     return pattern
 
 
+
 def line_order_corrector(df, line_order, line_order_grouped, nodes, node_order_grouped):
-    # Make lines run in node order.
-    df = df.set_index('line_id').loc[line_order].reset_index()  # Reorder the dataframe based on the line order
+    """
+    Make each line run in the node order.
+
+    Loopfix2-style robustness:
+    - Handles fallback paths where node_order_grouped may be missing entries
+      (e.g., forced scheduling adds node_path_grouped as []).
+    - Skips missing/empty lines safely.
+    """
+    # Sanitise line_order to only valid IDs present in df
+    valid_line_ids = set(df['line_id'].unique().tolist())
+    line_order = [int(l) for l in line_order if l is not None and int(l) in valid_line_ids]
+
+    if not line_order:
+        return df
+
+    # Reorder the dataframe based on the line order
+    df = df.set_index('line_id').loc[line_order].reset_index()
 
     for idx_path, path in enumerate(line_order_grouped):
         for idx_line, line in enumerate(path):
+
+            # Guard: fallback paths may not have node order entries
+            if node_order_grouped is None or idx_path >= len(node_order_grouped):
+                continue
+            if node_order_grouped[idx_path] is None or idx_line >= len(node_order_grouped[idx_path]):
+                continue
+
             start_node = node_order_grouped[idx_path][idx_line]
-            line_start = df[df['line_id'] == line].iloc[0][['x', 'y', 'z']].values
+            if start_node is None or start_node not in nodes.index:
+                continue
+
+            line_df = df[df['line_id'] == line]
+            if line_df.empty:
+                continue
+
+            line_start = line_df.iloc[0][['x', 'y', 'z']].values
             node_loc = nodes.loc[start_node][['x', 'y', 'z']].values
 
             if not np.array_equal(line_start, node_loc):
-                # print('Reversing line ', line)
-                new_line = df[df['line_id'] == line].iloc[::-1]
+                new_line = line_df.iloc[::-1]
                 df = df[df['line_id'] != line]
                 df = pd.concat([df, new_line])
 
-    df = df.set_index('line_id').loc[line_order].reset_index()  # Reorder the dataframe based on the line order
+    # Reorder again + recompute distances
+    df = df.set_index('line_id').loc[line_order].reset_index()
     df = distance_calculator(df)
     return df
-
-
 def midlinejumpsplitter(shape):
     # This needs generalising to lines with more than 2 jumps
     # print('Splitting line with id:', shape['line_id'].unique()[0])
@@ -679,10 +806,10 @@ def node_finder(df):
 def node_plotter(df, terminal_points, line_order, node_order, node_order_grouped):
     
 
-    # === Parameters ===
+    # Parameters
     n_interp = 50  # Interpolated points per segment
 
-    # === interpolates line segment ===
+    # interpolates line segment
     def interpolate_line(line_data, n_points=50):
         t = np.linspace(0, 1, len(line_data))
         fx = interp1d(t, line_data['x'], kind='linear')
@@ -691,7 +818,7 @@ def node_plotter(df, terminal_points, line_order, node_order, node_order_grouped
         t_new = np.linspace(0, 1, n_points)
         return np.vstack((fx(t_new), fy(t_new), fz(t_new))).T
 
-    # === terminal edges to line IDs ===
+    # terminal edges to line IDs
     terminal_edges = []
 
     for sublist in node_order_grouped:
@@ -704,7 +831,7 @@ def node_plotter(df, terminal_points, line_order, node_order, node_order_grouped
     edge_to_line = list(zip(terminal_edges, line_order))
     # print("edge to line", edge_to_line)
 
-    # === line segments in correct order and direction ===
+    # line segments in correct order and direction
     # print("Edge to line mapping:")
     
     line_segments = []
@@ -734,14 +861,14 @@ def node_plotter(df, terminal_points, line_order, node_order, node_order_grouped
         pts = interpolate_line(line_data, n_points=n_interp)
         line_segments.append(pts)
 
-    # === frame-to-segment map ===
+    # frame-to-segment map
     segment_lengths = [len(seg) for seg in line_segments]
     frame_to_segment = []
     for i, length in enumerate(segment_lengths):
         frame_to_segment += [(i, j) for j in range(length)]
 
 
-    # === Set up plot ===
+    # Set up plot
     fig = plt.figure(figsize=(10, 8))
     ax = fig.add_subplot(111, projection='3d')
 
@@ -765,7 +892,7 @@ def node_plotter(df, terminal_points, line_order, node_order, node_order_grouped
 
     ax.view_init(elev=30, azim=60)
 
-    # === Assign distinct colors based on jumps ===
+    # Assign distinct colors based on jumps
     distinct_colors = plt.cm.get_cmap('tab10').colors  
     n_colors = len(distinct_colors)
     colors = []
@@ -780,13 +907,13 @@ def node_plotter(df, terminal_points, line_order, node_order, node_order_grouped
             color_index += 1  # New color on jump
         colors.append(distinct_colors[color_index % n_colors])
 
-    # === Line plots ===
+    # Line plots
     plot_lines = [
         ax.plot([], [], [], color=colors[i], linewidth=2)[0]
         for i in range(len(line_segments))
     ]
 
-    # === Line ID labels (initially hidden) ===
+    # Line ID labels (initially hidden)
     line_labels = []
     for i, seg in enumerate(line_segments):
         mid_idx = len(seg) // 2
@@ -796,7 +923,7 @@ def node_plotter(df, terminal_points, line_order, node_order, node_order_grouped
                         color=colors[i], fontsize=10, visible=False)
         line_labels.append(label)
 
-    # === Node labels (initially hidden) ===
+    # Node labels (initially hidden)
     # node_labels = {}
     # for cluster in node_order:
     #     coords = terminal_points[terminal_points['cluster'] == cluster][['x', 'y', 'z']].iloc[0].values
@@ -804,10 +931,10 @@ def node_plotter(df, terminal_points, line_order, node_order, node_order_grouped
     #                     color='black', fontsize=9, visible=False)
     #     node_labels[cluster] = label
 
-    # === Print head (moving marker) ===
+    # Print head (moving marker)
     head, = ax.plot([], [], [], marker='o', color='red', markersize=5)
 
-    # === Animation update function ===
+    # Animation update function
     def update(frame):
         seg_idx, pt_idx = frame_to_segment[frame]
 
@@ -840,7 +967,7 @@ def node_plotter(df, terminal_points, line_order, node_order, node_order_grouped
 
         return plot_lines + [head] + line_labels# + list(node_labels.values())
 
-    # === Animate ===
+    # Animation
     ani = FuncAnimation(
         fig,
         update,
@@ -898,27 +1025,66 @@ def remove_overlap(shape):
     return shape
 
 
+def reorder_points_nearest_neighbour(shape: pd.DataFrame) -> pd.DataFrame:
+    """Reorder points in a line_id group into a continuous path using a greedy
+    nearest-neighbour walk. This prevents long 'teleport' segments when the export
+    order is scrambled or when multiple segments share a line_id.
+
+    Works well for smooth vessel paths and is fast enough for typical point counts.
+    """
+    if len(shape) <= 2:
+        return shape
+
+    coords = shape[['x','y','z']].to_numpy(dtype=float)
+
+    # Choose a start point: one end of the diameter (farthest pair approx)
+    # Approx by picking point farthest from centroid
+    centroid = coords.mean(axis=0)
+    d2 = np.sum((coords - centroid)**2, axis=1)
+    start_idx = int(np.argmax(d2))
+
+    visited = np.zeros(len(shape), dtype=bool)
+    order = []
+    current = start_idx
+
+    for _ in range(len(shape)):
+        order.append(current)
+        visited[current] = True
+        # find nearest unvisited
+        unvis = np.where(~visited)[0]
+        if unvis.size == 0:
+            break
+        diffs = coords[unvis] - coords[current]
+        dist2 = np.einsum('ij,ij->i', diffs, diffs)
+        current = int(unvis[int(np.argmin(dist2))])
+
+    # Reindex shape in that order
+    return shape.iloc[order].reset_index(drop=True)
+
 def preprocess(df, settings):
-    # Calculate the distance between consecutive points
-    df = distance_calculator(df)
     # If line ID column doesn't exist, assign line IDs based on RGB values
     if 'line_id' not in df.columns:
         df['line_id'] = pd.factorize(df[['r', 'g', 'b']].apply(tuple, axis=1))[0]
-    # Remove large jumps at the end of lines
-    df = df.groupby('line_id', group_keys=False).apply(remove_overlap)
 
-    # Recalculate the distance between consecutive points
+    # Ensure a stable ordering: group by line_id and reorder points into a continuous path.
+    df = df.groupby('line_id', group_keys=False).apply(reorder_points_nearest_neighbour)
+
+    # Compute distances within each line
     df = distance_calculator(df)
 
-    # Set distance from last to NaN for the first row of each line
-    df.loc[df.groupby('line_id').head(1).index, 'distance_from_last'] = np.nan
+    # Remove large jumps at the end of lines (if export wraps end->start)
+    df = df.groupby('line_id', group_keys=False).apply(remove_overlap)
 
-    # Find and split lines that have big jumps in the middle, e.g., inlet and outlet lines
+    # Recompute distances after any trimming
+    df = distance_calculator(df)
+
+    # Split lines that still have big jumps in the middle (multiple disconnected segments sharing a line_id)
     df = shapesplitter(df)
 
-    # Set distance from last to NaN for the first row of each line
-    df.loc[df.groupby('line_id').head(1).index, 'distance_from_last'] = np.nan
+    # Recompute distances after splitting
+    df = distance_calculator(df)
 
+    # Apply XY offsets/centering
     df['x'] = df['x'] - df['x'].mean() + settings['x_offset']
     df['y'] = df['y'] - df['y'].mean() + settings['y_offset']
 
@@ -932,15 +1098,36 @@ def shape_prep(settings):
 
     df = preprocess(df, settings)
 
-    # Find and plot nodes via hierarchical clustering
+    # Find nodes via hierarchical clustering
     df, terminal_points, nodes = node_finder(df)
 
+    # Build line_connectivity: node(cluster_id) -> list of line_ids touching that node
+    line_connectivity = {}
+    # terminal_points index is line_id, 'cluster' gives start/end node(s)
+    for line_id in terminal_points.index.unique():
+        clusters = terminal_points.loc[line_id]['cluster']
+        # clusters can be a scalar or a Series, so normalise:
+        for c in np.atleast_1d(clusters):
+            c = int(c)
+            line_connectivity.setdefault(c, []).append(int(line_id))
 
-    line_order, node_order, line_order_grouped, node_order_grouped = eulerficator(df, terminal_points, nodes)
+    # Node connectivity (node -> neighbouring nodes)
+    node_connectivity = node_connectivity_finder(line_connectivity)
 
+    # Unprinted lines is just the list of line_ids
+    unprinted_lines = sorted(df['line_id'].unique().tolist())
+
+    # Euler path / grouped order
+    # Use the real 3-arg Euler function that matches the report
+    line_order, node_order, line_order_grouped, node_order_grouped = eulerficator( df, terminal_points, nodes)
+
+
+    # Quick visualisation
     node_plotter_2(df, terminal_points)
-    # Correct line order to run in node order
+
+    # Make each line run in the node order and recompute distances
     df = line_order_corrector(df, line_order, line_order_grouped, nodes, node_order_grouped)
+
     return df, line_order_grouped
 
 

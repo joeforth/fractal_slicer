@@ -1,6 +1,4 @@
 import numpy as np
-from fracprint import processor
-
 
 def gcode_writer(df, settings, line_order_grouped):
     # Calculate extrusion amount between points
@@ -11,32 +9,55 @@ def gcode_writer(df, settings, line_order_grouped):
     # Write sections to file
     preamble(settings)
     cleaning(settings)
+    printed_line_ids = set()
     for path in line_order_grouped:
         position_printhead(df_print, path[0], settings)
         for line_id in path:
+            if line_id in printed_line_ids:
+                continue
             print_line(df_print, line_id, settings)
+            printed_line_ids.add(line_id)
         raise_printhead(df_print, settings)
     postamble(settings)
 
     return df_print
 
 
+
 def e_calculator(df, settings, line_order_grouped):
     d = settings['d']  # Nozzle diameter
     alpha = 0.7034   # Extrusion multiplier
-    # Start of print code
-    df = df[df['distance_from_last'] != 0.]
-    df = df.fillna(0)
-    df['V_mL'] = np.pi*((d/2)**2)*df['distance_from_last']
-    df['E'] = np.pi*(1/alpha)*df['V_mL']  # Amount to extrude
 
-    # Set the extrusion amount for the first line of each path to zero
+    df = df.copy()
+
+    # Ensure distance_from_last exists and NaNs become 0
+    if 'distance_from_last' not in df.columns:
+        df['distance_from_last'] = np.sqrt(
+            (df['x'].diff().fillna(0))**2 +
+            (df['y'].diff().fillna(0))**2 +
+            (df['z'].diff().fillna(0))**2
+        )
+    df['distance_from_last'] = df['distance_from_last'].fillna(0)
+
+    # DO NOT drop rows; just set E=0 for zero-distance moves
+    df['V_mL'] = np.pi * ((d / 2) ** 2) * df['distance_from_last']
+    df['E'] = np.pi * (1 / alpha) * df['V_mL']
+    df.loc[df['distance_from_last'] == 0, 'E'] = 0.0
+
+    # Set extrusion for the first printed point of each path to zero (if it exists)
     for path in line_order_grouped:
-        index_to_update = df[df['line_id'] == path[0]].index[0]  # Find the index of the first match
-        df.loc[index_to_update, 'E'] = 0  # Update the value at that index
+        if not path:
+            continue
+        first_id = path[0]
+        idxs = df.index[df['line_id'] == first_id].tolist()
+        if idxs:
+            df.loc[idxs[0], 'E'] = 0.0
 
     df['E_cumulative'] = df['E'].cumsum()
     return df
+
+
+
 
 
 def preamble(settings):
@@ -57,13 +78,13 @@ def cleaning(settings):
     cleaning_out = """\n
 ; Cleaning section
 G1 F800 ; Set speed for cleaning
-G1 X-50 Y50 ; Move to front left corner
+G1 X220 Y5 ; Move to front right corner ##CALIBRATE
 G1 F500 ; Slow down to remove vibration
 G1 Z{} ; Lower printhead to floor
-G1 X50 Y50 E{} ; Move to front right corner
+G1 X180 Y5 E{} ; Move towards front left corner ##CALIBRATE
 G1 Z{} ; Raise printhead
-G1 X97.5 Y147 F2000 ; Move printhead to centre of printbed
-G92 X0 Y0 E0 ; Set zero extrusion""".format(settings['floor'], settings['E_clean'], settings['roof'])
+G1 X165 Y105 F2000 ; Move printhead to centre of printbed  ##CALIBRATE
+G92 X0 Y0 E0 ; Set zero extrusion""".format(settings['floor'], settings['E_clean'], settings['roof'])  ##CALIBRATE?
     with open(settings['fileout'], "a") as file:
         file.write(cleaning_out)
 
@@ -76,7 +97,7 @@ M107 ; Fan off
 M140 S0 ; turn off heatbed
 M107 ; turn off fan
 G1 Z{} ; Raise printhead
-G1 X178 Y180 F4200 ; park print head
+G1 X178 Y180 F4200 ; park print head   ##CALIBRATE
 G28 ; Home all
 M84 ; disable motors
 M82 ; absolute extrusion mode
