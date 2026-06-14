@@ -84,7 +84,12 @@ def distance_calculator(df):
         return g
 
     if 'line_id' in df.columns:
-        return df.groupby('line_id', group_keys=False).apply(_within)
+        return (
+            df.groupby('line_id', sort=False)
+            .apply(_within, include_groups=False)
+            .reset_index(level=0)
+            .reset_index(drop=True)
+        )
 
     dx = df['x'].diff()
     dy = df['y'].diff()
@@ -868,7 +873,7 @@ def node_plotter(df, terminal_points, line_order, node_order, node_order_grouped
     ax.view_init(elev=30, azim=60)
 
     # Assign distinct colors based on jumps
-    distinct_colors = plt.cm.get_cmap('tab10').colors  
+    distinct_colors = plt.get_cmap('tab10').colors
     n_colors = len(distinct_colors)
     colors = []
     threshold = 1e-3  # jump threshold
@@ -1042,13 +1047,23 @@ def preprocess(df, settings):
         df['line_id'] = pd.factorize(df[['r', 'g', 'b']].apply(tuple, axis=1))[0]
 
     # Ensure a stable ordering: group by line_id and reorder points into a continuous path.
-    df = df.groupby('line_id', group_keys=False).apply(reorder_points_nearest_neighbour)
+    df = (
+        df.groupby('line_id', sort=False)
+        .apply(reorder_points_nearest_neighbour, include_groups=False)
+        .reset_index(level=0)
+        .reset_index(drop=True)
+    )
 
     # Compute distances within each line
     df = distance_calculator(df)
 
     # Remove large jumps at the end of lines (if export wraps end->start)
-    df = df.groupby('line_id', group_keys=False).apply(remove_overlap)
+    df = (
+        df.groupby('line_id', sort=False)
+        .apply(remove_overlap, include_groups=False)
+        .reset_index(level=0)
+        .reset_index(drop=True)
+    )
 
     # Recompute distances after any trimming
     df = distance_calculator(df)
