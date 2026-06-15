@@ -179,6 +179,8 @@ matplotlib
 
 shapely
 
+ipympl
+
 ### 2. Prepare your vascular network geometry
 Example vascular network created in Rhino
 
