@@ -83,7 +83,7 @@ G1 F500 ; Slow down to remove vibration
 G1 Z{} ; Lower printhead to floor
 G1 X180 Y5 E{} ; Move towards front left corner ##CALIBRATE
 G1 Z{} ; Raise printhead
-G1 X165 Y105 F2000 ; Move printhead to centre of printbed  ##CALIBRATE
+G1 X0 Y0 F2000 ; Move printhead to centre of printbed  ##CALIBRATE
 G92 X0 Y0 E0 ; Set zero extrusion""".format(settings['floor'], settings['E_clean'], settings['roof'])  ##CALIBRATE?
     with open(settings['fileout'], "a") as file:
         file.write(cleaning_out)
